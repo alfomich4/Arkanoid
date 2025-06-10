@@ -1,0 +1,5430 @@
+#include "Application.h"
+#include <cstdlib>
+
+namespace ArkanoidGame
+{
+	Application& Application::Instance()
+	{
+		static Application instance;
+		return instance;
+	}
+
+	Application::Application() :
+		window(sf::VideoMode(SCREEN_WIDTH, SCREEN_HEIGHT), GAME_NAME)
+	{
+		// Init random number generator
+		unsigned int seed = (unsigned int)time(nullptr); // Get current time as seed. You can also use any other number to fix randomization
+		srand(seed);
+	}
+
+	void Application::Run()
+	{
+		// Init game clock
+		sf::Clock gameClock;
+
+		// Game loop
+		while (window.isOpen()) {
+
+			float startTime = gameClock.getElapsedTime().asSeconds();
+
+			game.HandleWindowEvents(window);
+
+			if (!window.isOpen()) {
+				break;
+			}
+
+			if (game.Update(TIME_PER_FRAME))
+			{
+				// Draw everything here
+				// Clear the window first
+				window.clear();
+
+				game.Draw(window);
+
+				// End the current frame, display window contents on screen
+				window.display();
+			}
+			else
+			{
+				window.close();
+			}
+
+			float endTime = gameClock.getElapsedTime().asSeconds();
+			float deltaTime = endTime - startTime;
+			if (deltaTime < TIME_PER_FRAME) {
+				// Reduce framerate to not spam CPU and GPU
+				sf::sleep(sf::seconds(TIME_PER_FRAME - deltaTime));
+			}
+		}
+	}
+
+}#pragma once
+#include <SFML/Graphics.hpp>
+#include "Game.h"
+
+namespace ArkanoidGame {
+	
+	class Application
+	{
+	public:
+		Application(const Application& app) = delete;
+		Application& operator= (const Application&) = delete;
+		
+		static Application& Instance();
+
+		void Run();
+
+		Game& GetGame() { return game; }
+
+	private:
+		Application();
+		~Application() = default;
+
+	private:
+		Game game;
+		sf::RenderWindow window;
+	};
+
+}
+
+
+#include "Ball.h"
+#include "GameSettings.h"
+#include "Sprite.h"
+#include <assert.h>
+#include "randomizer.h"
+
+namespace
+{
+	// id textures
+	const std::string TEXTURE_ID = "ball";
+}
+
+namespace ArkanoidGame
+{
+	Ball::Ball(const sf::Vector2f& position)
+		: GameObject(TEXTURES_PATH + TEXTURE_ID + ".png", position, BALL_SIZE, BALL_SIZE)
+	{
+		const float angle = 90;
+		const auto pi = std::acos(-1.f);
+		direction.x = std::cos(pi / 180.f * angle);
+		direction.y = std::sin(pi / 180.f * angle);
+	}
+
+	void Ball::Update(float timeDelta)
+	{
+		const auto pos = sprite.getPosition() + BALL_SPEED * timeDelta * direction;
+		sprite.setPosition(pos);
+
+		if (pos.x - BALL_SIZE / 2.f <= 0 || pos.x + BALL_SIZE / 2.f >= SCREEN_WIDTH) {
+			direction.x *= -1;
+		}
+
+		if (pos.y - BALL_SIZE / 2.f <= 0 || pos.y + BALL_SIZE / 2.f >= SCREEN_HEIGHT) {
+			direction.y *= -1;
+		}
+	}
+
+	void Ball::InvertDirectionX()
+	{
+		direction.x *= -1;
+	}
+
+	void Ball::InvertDirectionY()
+	{
+		direction.y *= -1;
+	}
+
+	bool Ball::GetCollision(std::shared_ptr<Colladiable> collidable) const {
+		auto gameObject = std::dynamic_pointer_cast<GameObject>(collidable);
+		assert(gameObject);
+		return GetRect().intersects(gameObject->GetRect());
+	}
+
+	void Ball::OnHit()
+	{
+		lastAngle += random<float>(-5, 5);
+		ChangeAngle(lastAngle);
+	}
+
+	void Ball::ChangeAngle(float angle)
+	{
+		lastAngle = angle;
+		const auto pi = std::acos(-1.f);
+		direction.x = (angle / abs(angle)) * std::cos(pi / 180.f * angle);
+		direction.y = -1 * abs(std::sin(pi / 180.f * angle));
+	}
+}#pragma once
+#include "SFML/Graphics.hpp"
+#include "GameObject.h"
+#include "Collidable.h"
+
+namespace ArkanoidGame
+{
+	class Ball final : public GameObject, public Colladiable
+	{
+	public:
+		Ball(const sf::Vector2f& position);
+		~Ball() = default;
+		void Update(float timeDelta) override;
+
+		void InvertDirectionX();
+		void InvertDirectionY();
+
+		bool GetCollision(std::shared_ptr<Colladiable> collidable) const  override;
+		void ChangeAngle(float x);
+	private:
+		void OnHit();
+		sf::Vector2f direction;
+		float lastAngle = 90;
+	};
+}
+
+
+#include "Block.h"
+#include "Sprite.h"
+#include "GameSettings.h"
+
+#include <assert.h>
+
+namespace
+{
+	const std::string TEXTURE_ID = "platform";
+}
+
+namespace ArkanoidGame
+{
+	Block::Block(const sf::Vector2f& position, const sf::Color& color)
+		: GameObject(TEXTURES_PATH + TEXTURE_ID + ".png", position, BLOCK_WIDTH, BLOCK_HEIGHT)
+	{
+		sprite.setColor(color);
+	}
+
+	bool Block::GetCollision(std::shared_ptr<Colladiable> collidableObject) const {
+		auto gameObject = std::dynamic_pointer_cast<GameObject>(collidableObject);
+		assert(gameObject);
+		sf::Rect rect = gameObject->GetRect();
+		rect.width *= 1.1;
+		return GetRect().intersects(gameObject->GetRect());
+	}
+
+	void Block::OnHit()
+	{
+		hitCount = 0;
+	}
+
+	bool Block::IsBroken()
+	{
+		return hitCount <= 0;
+	}
+
+	void Block::Update(float timeDelta)
+	{
+
+	}
+
+	Block::~Block() {
+
+	}
+	
+
+
+	SmoothDestroyableBlock::SmoothDestroyableBlock(const sf::Vector2f& position, const sf::Color& color)
+		: Block(position, color)
+		, color(color)
+
+	{
+	}
+
+
+
+	void SmoothDestroyableBlock::Update(float timeDelta)
+	{
+		UpdateTimer(timeDelta);
+	}
+
+	bool SmoothDestroyableBlock::GetCollision(std::shared_ptr<Colladiable> collidableObject) const {
+		if (isTimerStarted_) {
+			return false;
+		}
+
+		auto gameObject = std::dynamic_pointer_cast<GameObject>(collidableObject);
+		assert(gameObject);
+		sf::Rect rect = gameObject->GetRect();
+		rect.width *= 1.1f;
+		return GetRect().intersects(gameObject->GetRect());
+	}
+
+	void SmoothDestroyableBlock::OnHit()
+	{
+		StartTimer(BREAK_DELAY);
+	}
+
+	void SmoothDestroyableBlock::FinalAction()
+	{
+		--hitCount;
+	}
+
+	void SmoothDestroyableBlock::EachTickAction(float deltaTime)
+	{
+		color.a = 255 * currentTime_ / destroyTime_;
+		sprite.setColor(color);
+	}
+
+	UnbreackableBlock::UnbreackableBlock(const sf::Vector2f& position)
+		: Block(position, sf::Color::Color(105, 105, 105))
+	{	}
+
+	void UnbreackableBlock::OnHit() {
+		//--hit_count ;
+	}
+}#pragma once
+#include "Ball.h"
+#include "GameObject.h"
+#include "Collidable.h"
+#include "IDelayedAction.h"
+
+namespace ArkanoidGame
+{
+	class Block : public GameObject, public Colladiable
+	{
+	protected:
+		void OnHit();
+		int hitCount = 1;
+	public:
+		Block(const sf::Vector2f& position, const sf::Color& color = sf::Color::Green);
+		virtual ~Block();
+		bool GetCollision(std::shared_ptr<Colladiable> collidableObject) const override;
+		void Update(float timeDelta) override;
+		bool IsBroken();
+	};
+
+	class SmoothDestroyableBlock : public Block, public IDelayedAction
+	{
+	protected:
+		void OnHit() override;
+		sf::Color color;
+	public:
+		SmoothDestroyableBlock(const sf::Vector2f& position, const sf::Color& color = sf::Color::Green);
+		~SmoothDestroyableBlock() = default;
+		void Update(float timeDelta) override;
+
+		bool GetCollision(std::shared_ptr<Colladiable> collidableObject) const override;
+		void FinalAction() override;
+		void EachTickAction(float deltaTime) override;
+	};
+
+	class UnbreackableBlock : public Block
+	{
+	public:
+		UnbreackableBlock(const sf::Vector2f& position);
+		void OnHit() override;
+		void Update(float) {
+			int i = 0;
+			++i;
+		};
+	};
+}
+
+#pragma once
+#include "SFML/Graphics.hpp"
+#include <memory>
+
+namespace ArkanoidGame
+{
+	class Colladiable {
+	protected:
+		virtual void OnHit() = 0;
+	public:
+		virtual bool CheckCollision(std::shared_ptr<Colladiable> collidable) {
+			if (GetCollision(collidable)) {
+				OnHit();
+				collidable->OnHit();
+				return true;
+			}
+			return false;
+		}
+
+		virtual bool GetCollision(std::shared_ptr<Colladiable> collidable) const = 0;
+	};
+}#include "Game.h"
+#include <assert.h>
+#include <algorithm>
+#include "GameStatePlaying.h"
+#include "GameStateGameOver.h"
+#include "GameStatePauseMenu.h"
+#include "GameStateMainMenu.h"
+#include "GameStateRecords.h"
+
+namespace ArkanoidGame
+{
+
+	Game::Game()
+	{
+		// Generate fake records table
+		recordsTable =
+		{
+			{"John", MAX_APPLES / 2},
+			{"Jane", MAX_APPLES / 3 },
+			{"Alice", MAX_APPLES / 4 },
+			{"Bob", MAX_APPLES / 5 },
+			{"Clementine", MAX_APPLES / 5 },
+		};
+
+		stateChangeType = GameStateChangeType::None;
+		pendingGameStateType = GameStateType::None;
+		pendingGameStateIsExclusivelyVisible = false;
+		SwitchStateTo(GameStateType::MainMenu);
+	}
+
+	Game::~Game()
+	{
+		Shutdown();
+	}
+
+	void Game::HandleWindowEvents(sf::RenderWindow& window)
+	{
+		sf::Event event;
+		while (window.pollEvent(event))
+		{
+			// Close window if close button or Escape key pressed
+			if (event.type == sf::Event::Closed)
+			{
+				window.close();
+			}
+
+			if (stateStack.size() > 0)
+			{
+				stateStack.back().HandleWindowEvent(event);
+			}
+		}
+	}
+
+	bool Game::Update(float timeDelta)
+	{
+		if (stateChangeType == GameStateChangeType::Switch)
+		{
+			// Shutdown all game states
+			while (stateStack.size() > 0)
+			{
+				stateStack.pop_back();
+			}
+		}
+		else if (stateChangeType == GameStateChangeType::Pop)
+		{
+			// Shutdown only current game state
+			if (stateStack.size() > 0)
+			{
+				stateStack.pop_back();
+			}
+		}
+
+		// Initialize new game state if needed
+		if (pendingGameStateType != GameStateType::None)
+		{
+			stateStack.push_back(GameState(pendingGameStateType, pendingGameStateIsExclusivelyVisible));
+		}
+
+		stateChangeType = GameStateChangeType::None;
+		pendingGameStateType = GameStateType::None;
+		pendingGameStateIsExclusivelyVisible = false;
+
+		if (stateStack.size() > 0)
+		{
+			stateStack.back().Update(timeDelta);
+			return true;
+		}
+
+		return false;
+	}
+
+	void Game::Draw(sf::RenderWindow& window)
+	{
+		if (stateStack.size() > 0)
+		{
+			std::vector<GameState*> visibleGameStates;
+			for (auto it = stateStack.rbegin(); it != stateStack.rend(); ++it)
+			{
+				visibleGameStates.push_back(&(*it));
+				if (it->IsExclusivelyVisible())
+				{
+					break;
+				}
+			}
+
+			for (auto it = visibleGameStates.rbegin(); it != visibleGameStates.rend(); ++it)
+			{
+				(*it)->Draw(window);
+			}
+		}
+	}
+
+	void Game::Shutdown()
+	{
+		// Shutdown all game states
+		while (stateStack.size() > 0)
+		{
+			stateStack.pop_back();
+		}
+
+		stateChangeType = GameStateChangeType::None;
+		pendingGameStateType = GameStateType::None;
+		pendingGameStateIsExclusivelyVisible = false;
+	}
+
+	void Game::PushState(GameStateType stateType, bool isExclusivelyVisible)
+	{
+		pendingGameStateType = stateType;
+		pendingGameStateIsExclusivelyVisible = isExclusivelyVisible;
+		stateChangeType = GameStateChangeType::Push;
+	}
+
+	void Game::PopState()
+	{
+		pendingGameStateType = GameStateType::None;
+		pendingGameStateIsExclusivelyVisible = false;
+		stateChangeType = GameStateChangeType::Pop;
+	}
+
+	void Game::SwitchStateTo(GameStateType newState)
+	{
+		pendingGameStateType = newState;
+		pendingGameStateIsExclusivelyVisible = false;
+		stateChangeType = GameStateChangeType::Switch;
+	}
+
+	bool Game::IsEnableOptions(GameOptions option) const
+	{
+		const bool isEnable = ((std::uint8_t)options & (std::uint8_t)option) != (std::uint8_t)GameOptions::Empty;
+		return isEnable;
+	}
+
+	void Game::SetOption(GameOptions option, bool value)
+	{
+		if (value) {
+			options = (GameOptions)((std::uint8_t)options | (std::uint8_t)option);
+		}
+		else {
+			options = (GameOptions)((std::uint8_t)options & ~(std::uint8_t)option);
+		}
+	}
+
+	int Game::GetRecordByPlayerId(const std::string& playerId) const
+	{
+		auto it = recordsTable.find(playerId);
+		return it == recordsTable.end() ? 0 : it->second;
+	}
+
+	void Game::UpdateRecord(const std::string& playerId, int score)
+	{
+		recordsTable[playerId] = std::max(recordsTable[playerId], score);
+	}
+}
+#pragma once
+#include <SFML/Graphics.hpp>
+
+#include "Sprite.h"
+#include "GameSettings.h"
+#include "GameState.h"
+#include <unordered_map>
+
+namespace ArkanoidGame
+{
+	enum class GameOptions: std::uint8_t
+	{
+		InfiniteApples = 1 << 0,
+		WithAcceleration = 1 << 1,
+
+		Default = InfiniteApples | WithAcceleration,
+		Empty = 0
+	};
+
+	enum class GameStateChangeType
+	{
+		None,
+		Push,
+		Pop,
+		Switch
+	};
+
+	class Game
+	{
+	public:
+		using RecordsTable = std::unordered_map<std::string, int>;
+
+		Game();
+		~Game();
+
+		void HandleWindowEvents(sf::RenderWindow& window);
+		bool Update(float timeDelta); // Return false if game should be closed
+		void Draw(sf::RenderWindow& window);
+		void Shutdown();
+
+		bool IsEnableOptions(GameOptions option) const;
+		void SetOption(GameOptions option, bool value);
+
+		const RecordsTable& GetRecordsTable() const { return recordsTable; }
+		int GetRecordByPlayerId(const std::string& playerId) const;
+		void UpdateRecord(const std::string& playerId, int score);
+
+		// Add new game state on top of the stack
+		void PushState(GameStateType stateType, bool isExclusivelyVisible);
+
+		// Remove current game state from the stack
+		void PopState();
+
+		// Remove all game states from the stack and add new one
+		void SwitchStateTo(GameStateType newState);
+
+		
+	private:
+		std::vector<GameState> stateStack;
+		GameStateChangeType stateChangeType = GameStateChangeType::None;
+		GameStateType pendingGameStateType = GameStateType::None;
+		bool pendingGameStateIsExclusivelyVisible = false;
+
+		GameOptions options = GameOptions::Default;
+		RecordsTable recordsTable;
+	};
+}
+﻿// ©2023, XYZ School. All rights reserved.
+// Authored by Aleksandr Rybalka (polterageist@gmail.com)
+
+#include <SFML/Graphics.hpp>
+#include "Application.h"
+
+
+using namespace ArkanoidGame;
+
+int main()
+{
+	Application::Instance().Run();
+
+	return 0;
+}
+#include "GameObject.h"
+#include "Sprite.h"
+#include <assert.h>
+
+
+namespace ArkanoidGame
+{
+	GameObject::GameObject(const std::string& texturePath, const sf::Vector2f& position, float width, float height)
+	{
+		assert(texture.loadFromFile(texturePath));
+
+		InitSprite(sprite, width, height, texture);
+		sprite.setPosition(position);
+	}
+
+	void GameObject::Draw(sf::RenderWindow& window)
+	{
+		DrawSprite(sprite, window);
+	}
+}#pragma once
+#include "SFML/Graphics.hpp"
+
+
+namespace ArkanoidGame
+{
+	class GameObject
+	{
+	public:
+		GameObject(const std::string& textureId, const sf::Vector2f& position, float width, float height);
+		virtual ~GameObject() = default;
+		
+		virtual void Update(float timeDelta) = 0;
+		virtual void Draw(sf::RenderWindow& window);
+
+		const sf::Vector2f& GetPosition() const { return sprite.getPosition(); }
+		sf::FloatRect GetRect() const { return sprite.getGlobalBounds(); }
+	
+	protected:
+		sf::Sprite sprite;
+		sf::Texture texture;
+	};
+}
+
+
+#pragma once
+#include <string>
+
+namespace ArkanoidGame
+{
+	// Resources path
+	const std::string RESOURCES_PATH = "Resources/";
+	const std::string TEXTURES_PATH = RESOURCES_PATH + "Textures/";
+	const std::string FONTS_PATH = RESOURCES_PATH + "Fonts/";
+	const std::string SOUNDS_PATH = RESOURCES_PATH + "Sounds/";
+
+	// Game settings constants
+	const float ACCELERATION = 10.f;
+	const int MAX_APPLES = 80;
+	const unsigned int SCREEN_WIDTH = 800;
+	const unsigned int SCREEN_HEIGHT = 600;
+	const float TIME_PER_FRAME = 1.f / 60.f; // 60 fps
+
+	const unsigned int BALL_SIZE = 20;
+	const unsigned int BALL_SPEED = 400;
+
+	const unsigned int PLATFORM_WIDTH = 60;
+	const unsigned int PLATFORM_HEIGHT = 20;
+	const float PLATFORM_SPEED = 300.f;
+
+	const unsigned int BLOCKS_COUNT_ROWS = 4;
+	const unsigned int BLOCKS_COUNT_IN_ROW = 15;
+	const unsigned int BLOCK_SHIFT = 5;
+	const unsigned int BLOCK_WIDTH = (SCREEN_WIDTH - (BLOCKS_COUNT_IN_ROW + 1) * BLOCK_SHIFT) / BLOCKS_COUNT_IN_ROW;
+	const unsigned int BLOCK_HEIGHT = 20;
+	
+	const int MAX_RECORDS_TABLE_SIZE = 5;
+	extern const char* PLAYER_NAME; // We need to define this constant in some CPP
+
+	const std::string GAME_NAME = "ArkanoidGame";
+	const float BREAK_DELAY = 1.f;
+}
+#include "GameState.h"
+#include "GameStateData.h"
+#include "GameStatePlaying.h"
+#include "GameStateGameOver.h"
+#include "GameStateGameWin.h"
+#include "GameStatePauseMenu.h"
+#include "GameStateMainMenu.h"
+#include "GameStateRecords.h"
+
+#include <assert.h>
+
+
+namespace ArkanoidGame
+{
+	GameState::GameState(GameStateType type, bool isExclusivelyVisible)
+		: type(type)
+		, isExclusivelyVisible(isExclusivelyVisible)
+	{
+		switch (type)
+		{
+		case GameStateType::MainMenu:
+		{
+			data = std::make_unique<GameStateMainMenuData>();
+			break;
+		}
+		case GameStateType::Playing:
+		{
+			data = std::make_unique<GameStatePlayingData>();
+			break;
+		}
+		case GameStateType::GameOver:
+		{
+			data = std::make_unique<GameStateGameOverData>();
+			break;
+		}
+		case GameStateType::GameWin:
+		{
+			data = std::make_unique<GameStateGameWinData>();
+			break;
+		}
+		case GameStateType::ExitDialog:
+		{
+			data = std::make_unique<GameStatePauseMenuData>();
+			break;
+		}
+		case GameStateType::Records:
+		{
+			data = std::make_unique<GameStateRecordsData>();
+			break;
+		}
+		default:
+			assert(false); // We want to know if we forgot to implement new game state
+			break;
+		}
+		if (data) {
+			data->Init();
+		}
+	}
+
+	GameState::~GameState()
+	{
+		if (data) {
+			data = nullptr;
+		}
+	}
+
+	void GameState::Update(float timeDelta)
+	{
+		data->Update(timeDelta);
+	}
+
+	void GameState::Draw(sf::RenderWindow& window)
+	{
+		data->Draw(window);
+	}
+
+	void GameState::HandleWindowEvent(sf::Event& event)
+	{
+		data->HandleWindowEvent(event);
+	}
+}#pragma once
+#include <SFML/Graphics.hpp>
+#include "GameStateData.h"
+
+namespace ArkanoidGame
+{
+	enum class GameStateType
+	{
+		None = 0,
+		MainMenu,
+		Playing,
+		GameOver,
+		GameWin,
+		ExitDialog,
+		Records,
+	};
+
+	class GameState
+	{
+	public:
+		GameState() = default;
+		GameState(GameStateType type, bool isExclusivelyVisible);
+		GameState(const GameState& state) = delete;
+		GameState(GameState&& state) { operator=(std::move(state)); }
+
+		~GameState();
+
+		GameState& operator= (const GameState& state) = delete;
+		GameState& operator= (GameState&& state) noexcept {
+			type = state.type;
+			data = std::move(state.data);
+			isExclusivelyVisible = state.isExclusivelyVisible;
+			state.data = nullptr;
+			return *this;
+		}
+
+		GameStateType GetType() const { return type; }
+		bool IsExclusivelyVisible() const { return isExclusivelyVisible; }
+
+		template<class T>
+		T* GetData() const {
+			return static_cast<T>(data);
+		}
+
+		void Update(float timeDelta);
+		void Draw(sf::RenderWindow& window);
+		void HandleWindowEvent(sf::Event& event);
+
+	private:
+		GameStateType type = GameStateType::None;
+		std::unique_ptr<GameStateData> data = nullptr;
+		bool isExclusivelyVisible = false;
+	};
+
+}#include "GameStateData.h"
+#pragma once
+#include <SFML/Graphics.hpp>
+
+class GameStateData
+{
+public:
+	virtual ~GameStateData() = default;
+
+	virtual void Init() = 0;
+	virtual void HandleWindowEvent(const sf::Event& event) = 0;
+	virtual void Update(float timeDelta) = 0;
+	virtual void Draw(sf::RenderWindow& window) = 0;
+};
+
+#include "GameStateGameOver.h"
+#include "Application.h"
+#include "Game.h"
+#include "Text.h"
+#include <assert.h>
+#include <sstream>
+
+namespace ArkanoidGame
+{
+	const char* PLAYER_NAME = "Player";
+
+	void GameStateGameOverData::Init()
+	{
+		assert(font.loadFromFile(RESOURCES_PATH + "Fonts/Roboto-Regular.ttf"));
+
+		timeSinceGameOver = 0.f;
+
+		sf::Color backgroundColor = sf::Color::Black;
+		backgroundColor.a = 200; // a means Alfa, opacity
+		background.setFillColor(backgroundColor);
+
+		gameOverText.setFont(font);
+		gameOverText.setCharacterSize(48);
+		gameOverText.setStyle(sf::Text::Bold);
+		gameOverText.setFillColor(sf::Color::Red);
+		gameOverText.setString("GAME OVER");
+		
+		recordsTableTexts.reserve(MAX_RECORDS_TABLE_SIZE);
+
+		std::multimap<int, std::string> sortedRecordsTable;
+		Game& game = Application::Instance().GetGame();
+		for (const auto& item : game.GetRecordsTable())
+		{
+			sortedRecordsTable.insert(std::make_pair(item.second, item.first));
+		}
+
+		bool isPlayerInTable = false;
+		auto it = sortedRecordsTable.rbegin();
+		for (int i = 0; i < MAX_RECORDS_TABLE_SIZE && it != sortedRecordsTable.rend(); ++i, ++it) // Note, we can do several actions in for action block
+		{
+			recordsTableTexts.emplace_back(); // Create text in place
+			sf::Text& text = recordsTableTexts.back();
+
+			// We can use streams for writing into string and reading from it
+			std::stringstream sstream;
+			sstream << i + 1 << ". " << it->second << ": " << it->first;
+			text.setString(sstream.str());
+			text.setFont(font);
+			text.setCharacterSize(24);
+			if (it->second == PLAYER_NAME)
+			{
+				text.setFillColor(sf::Color::Green);
+				isPlayerInTable = true;
+			}
+			else
+			{
+				text.setFillColor(sf::Color::White);
+			}
+		}
+
+		// If player is not in table, replace last element with him
+		if (!isPlayerInTable)
+		{
+			sf::Text& text = recordsTableTexts.back();
+			std::stringstream sstream;
+			int playerScores = game.GetRecordByPlayerId(PLAYER_NAME);
+			sstream << MAX_RECORDS_TABLE_SIZE << ". " << PLAYER_NAME << ": " << playerScores;
+			text.setString(sstream.str());
+			text.setFillColor(sf::Color::Green);
+		}
+
+		hintText.setFont(font);
+		hintText.setCharacterSize(24);
+		hintText.setFillColor(sf::Color::White);
+		hintText.setString("Press Space to restart\nEsc to exit to main menu");
+	}
+
+	void GameStateGameOverData::HandleWindowEvent(const sf::Event& event)
+	{
+		if (event.type == sf::Event::KeyPressed)
+		{
+			if (event.key.code == sf::Keyboard::Space)
+			{
+				Application::Instance().GetGame().SwitchStateTo(GameStateType::Playing);
+			}
+			else if (event.key.code == sf::Keyboard::Escape)
+			{
+				Application::Instance().GetGame().SwitchStateTo(GameStateType::MainMenu);
+			}
+		}
+	}
+
+	void GameStateGameOverData::Update(float timeDelta)
+	{
+		timeSinceGameOver += timeDelta;
+
+		sf::Color gameOverTextColor = (int)timeSinceGameOver % 2 ? sf::Color::Red : sf::Color::Yellow;
+		gameOverText.setFillColor(gameOverTextColor);
+
+	}
+
+	void GameStateGameOverData::Draw(sf::RenderWindow& window)
+	{
+		sf::Vector2f viewSize = window.getView().getSize();
+
+		background.setOrigin(0.f, 0.f);
+		background.setSize(viewSize);
+		window.draw(background);
+
+		gameOverText.setOrigin(GetTextOrigin(gameOverText, { 0.5f, 1.f }));
+		gameOverText.setPosition(viewSize.x / 2.f, viewSize.y / 2 - 50.f);
+		window.draw(gameOverText);
+
+		// We need to create new vector here as DrawItemsList needs vector of pointers
+		std::vector<sf::Text*> textsList;
+		textsList.reserve(recordsTableTexts.size());
+		for (auto& text : recordsTableTexts)
+		{
+			textsList.push_back(&text);
+		}
+
+		sf::Vector2f tablePosition = { viewSize.x / 2, viewSize.y / 2.f };
+		DrawTextList(window, textsList, 10.f, Orientation::Vertical, Alignment::Min, tablePosition, { 0.5f, 0.f });
+
+		hintText.setOrigin(GetTextOrigin(hintText, { 0.5f, 1.f }));
+		hintText.setPosition(viewSize.x / 2.f, viewSize.y - 50.f);
+		window.draw(hintText);
+	}
+}
+#pragma once
+#include "SFML/Graphics.hpp"
+#include "GameStateData.h"
+
+namespace ArkanoidGame
+{
+	class Game;
+
+	class GameStateGameOverData : public GameStateData
+	{
+	public:
+		void Init() override;
+		void HandleWindowEvent(const sf::Event& event) override;
+		void Update(float timeDelta) override;
+		void Draw(sf::RenderWindow& window) override;
+
+	private:
+		// Resources
+		sf::Font font;
+
+		float timeSinceGameOver = 0.f;
+
+		// UI data
+		sf::RectangleShape background;
+		sf::Text gameOverText;
+		sf::Text hintText;
+		std::vector<sf::Text> recordsTableTexts;
+	};
+}
+#include "GameStateGameWin.h"
+#include "Application.h"
+#include "Game.h"
+#include "Text.h"
+#include <assert.h>
+#include <sstream>
+
+namespace ArkanoidGame
+{
+	void GameStateGameWinData::Init()
+	{
+		assert(font.loadFromFile(RESOURCES_PATH + "Fonts/Roboto-Regular.ttf"));
+
+		timeSinceGameWin = 0.f;
+
+		sf::Color backgroundColor = sf::Color::Black;
+		backgroundColor.a = 200; // a means Alfa, opacity
+		background.setFillColor(backgroundColor);
+
+		gameWinText.setFont(font);
+		gameWinText.setCharacterSize(48);
+		gameWinText.setStyle(sf::Text::Bold);
+		gameWinText.setFillColor(sf::Color::Green);
+		gameWinText.setString("GAME WIN");
+
+		hintText.setFont(font);
+		hintText.setCharacterSize(24);
+		hintText.setFillColor(sf::Color::White);
+		hintText.setString("Press Space to restart\nEsc to exit to main menu");
+	}
+
+	void GameStateGameWinData::HandleWindowEvent(const sf::Event& event)
+	{
+		if (event.type == sf::Event::KeyPressed)
+		{
+			if (event.key.code == sf::Keyboard::Space)
+			{
+				Application::Instance().GetGame().SwitchStateTo(GameStateType::Playing);
+			}
+			else if (event.key.code == sf::Keyboard::Escape)
+			{
+				Application::Instance().GetGame().SwitchStateTo(GameStateType::MainMenu);
+			}
+		}
+	}
+
+	void GameStateGameWinData::Update(float timeDelta)
+	{
+		timeSinceGameWin += timeDelta;
+
+		sf::Color GameWinTextColor = (int)timeSinceGameWin % 2 ? sf::Color::Green : sf::Color::Yellow;
+		gameWinText.setFillColor(GameWinTextColor);
+	}
+
+	void GameStateGameWinData::Draw(sf::RenderWindow& window)
+	{
+		sf::Vector2f viewSize = window.getView().getSize();
+
+		background.setOrigin(0.f, 0.f);
+		background.setSize(viewSize);
+		window.draw(background);
+
+		gameWinText.setOrigin(GetTextOrigin(gameWinText, { 0.5f, 1.f }));
+		gameWinText.setPosition(viewSize.x / 2.f, viewSize.y / 2 - 50.f);
+		window.draw(gameWinText);
+
+		hintText.setOrigin(GetTextOrigin(hintText, { 0.5f, 1.f }));
+		hintText.setPosition(viewSize.x / 2.f, viewSize.y - 50.f);
+		window.draw(hintText);
+	}
+}
+#pragma once
+#include "SFML/Graphics.hpp"
+#include "GameStateData.h"
+
+namespace ArkanoidGame
+{
+	class Game;
+
+	class GameStateGameWinData : public GameStateData
+	{
+	public:
+		void Init() override;
+		void HandleWindowEvent(const sf::Event& event) override;
+		void Update(float timeDelta) override;
+		void Draw(sf::RenderWindow& window) override;
+
+	private:
+		// Resources
+		sf::Font font;
+
+		float timeSinceGameWin = 0.f;
+
+		// UI data
+		sf::RectangleShape background;
+		sf::Text gameWinText;
+		sf::Text hintText;
+	};
+}
+#include "GameStateMainMenu.h"
+#include "Application.h"
+#include "Game.h"
+#include <assert.h>
+
+namespace ArkanoidGame
+{
+	void GameStateMainMenuData::Init()
+	{
+		assert(font.loadFromFile(RESOURCES_PATH + "Fonts/Roboto-Regular.ttf"));
+
+		MenuItem startGame;
+		startGame.text.setString("Start Game");
+		startGame.text.setFont(font);
+		startGame.text.setCharacterSize(24);
+		startGame.onPressCallback = [](MenuItem&) {
+			Application::Instance().GetGame().SwitchStateTo(GameStateType::Playing);
+			};
+		
+		const bool isInfiniteApples = Application::Instance().GetGame().IsEnableOptions(GameOptions::InfiniteApples);
+		MenuItem optionsInfiniteApplesItem;
+		optionsInfiniteApplesItem.text.setString("Infinite Apples: " + std::string(isInfiniteApples ? "On" : "Off"));
+		optionsInfiniteApplesItem.text.setFont(font);
+		optionsInfiniteApplesItem.text.setCharacterSize(24);
+		optionsInfiniteApplesItem.onPressCallback = [](MenuItem& item) {
+			Game& game = Application::Instance().GetGame();
+			bool newOptionValue = !game.IsEnableOptions(GameOptions::InfiniteApples);
+			game.SetOption(GameOptions::InfiniteApples, newOptionValue);
+			item.text.setString("Infinite Apples: " + std::string(newOptionValue ? "On" : "Off"));
+			};
+
+		const bool isWithAcceleration = Application::Instance().GetGame().IsEnableOptions(GameOptions::WithAcceleration);
+		MenuItem optionsWithAccelerationItem;
+		optionsWithAccelerationItem.text.setString("With Acceleration: " + std::string(isWithAcceleration ? "On" : "Off"));
+		optionsWithAccelerationItem.text.setFont(font);
+		optionsWithAccelerationItem.text.setCharacterSize(24);
+		optionsWithAccelerationItem.onPressCallback = [](MenuItem& item) {
+			Game& game = Application::Instance().GetGame();
+			bool newOptionValue = !game.IsEnableOptions(GameOptions::WithAcceleration);
+			game.SetOption(GameOptions::WithAcceleration, newOptionValue);
+			item.text.setString("With Acceleration: " + std::string(newOptionValue ? "On" : "Off"));
+			};
+
+		MenuItem options;
+		options.text.setString("Options");
+		options.text.setFont(font);
+		options.text.setCharacterSize(24);
+		options.hintText.setString("Options");
+		options.hintText.setFont(font);
+		options.hintText.setCharacterSize(48);
+		options.hintText.setFillColor(sf::Color::Red);
+		options.childrenOrientation = Orientation::Vertical;
+		options.childrenAlignment = Alignment::Middle;
+		options.childrenSpacing = 10.f;
+		options.childrens.push_back(optionsInfiniteApplesItem);
+		options.childrens.push_back(optionsWithAccelerationItem);
+		
+		MenuItem recordsItem;
+		recordsItem.text.setString("Records");
+		recordsItem.text.setFont(font);
+		recordsItem.text.setCharacterSize(24);
+		recordsItem.onPressCallback = [](MenuItem&) {
+			Application::Instance().GetGame().PushState(GameStateType::Records, true);
+			};
+
+		MenuItem yesItem;
+		yesItem.text.setString("Yes");
+		yesItem.text.setFont(font);
+		yesItem.text.setCharacterSize(24);
+		yesItem.onPressCallback = [](MenuItem&) {
+			Application::Instance().GetGame().SwitchStateTo(GameStateType::None);
+			};
+
+		MenuItem noItem;
+		noItem.text.setString("No");
+		noItem.text.setFont(font);
+		noItem.text.setCharacterSize(24);
+		noItem.onPressCallback = [this](MenuItem&) {
+			menu.GoBack();
+			};
+
+		MenuItem exitGameItem;
+		exitGameItem.text.setString("Exit Game");
+		exitGameItem.text.setFont(font);
+		exitGameItem.text.setCharacterSize(24);
+		exitGameItem.hintText.setString("Are you sure?");
+		exitGameItem.hintText.setFont(font);
+		exitGameItem.hintText.setCharacterSize(48);
+		exitGameItem.hintText.setFillColor(sf::Color::Red);
+		exitGameItem.childrenOrientation = Orientation::Horizontal;
+		exitGameItem.childrenAlignment = Alignment::Middle;
+		exitGameItem.childrenSpacing = 10.f;
+		exitGameItem.childrens.push_back(yesItem);
+		exitGameItem.childrens.push_back(noItem);
+
+		MenuItem mainMenu;
+		mainMenu.hintText.setString("Arkanoid Game");
+		mainMenu.hintText.setFont(font);
+		mainMenu.hintText.setCharacterSize(48);
+		mainMenu.hintText.setFillColor(sf::Color::Red);
+		mainMenu.childrenOrientation = Orientation::Vertical;
+		mainMenu.childrenAlignment = Alignment::Middle;
+		mainMenu.childrenSpacing = 10.f;
+		mainMenu.childrens.push_back(startGame);
+		mainMenu.childrens.push_back(options);
+		mainMenu.childrens.push_back(recordsItem);
+		mainMenu.childrens.push_back(exitGameItem);
+		
+
+		menu.Init(mainMenu);
+	}
+
+	void GameStateMainMenuData::HandleWindowEvent(const sf::Event& event)
+	{
+		if (event.type == sf::Event::KeyPressed)
+		{
+			if (event.key.code == sf::Keyboard::Escape)
+			{
+				menu.GoBack();
+			}
+			else if (event.key.code == sf::Keyboard::Enter)
+			{
+				menu.PressOnSelectedItem();
+			}
+			
+			Orientation orientation = menu.GetCurrentContext().childrenOrientation;
+			if (orientation == Orientation::Vertical && event.key.code == sf::Keyboard::Up ||
+				orientation == Orientation::Horizontal && event.key.code == sf::Keyboard::Left)
+			{
+				menu.SwitchToPreviousMenuItem();
+			}
+			else if (orientation == Orientation::Vertical && event.key.code == sf::Keyboard::Down ||
+						orientation == Orientation::Horizontal && event.key.code == sf::Keyboard::Right)
+			{
+				menu.SwitchToNextMenuItem();
+			}
+		}
+	}
+
+	void GameStateMainMenuData::Update(float timeDelta)
+	{
+
+	}
+
+	void GameStateMainMenuData::Draw(sf::RenderWindow& window)
+	{
+		sf::Vector2f viewSize = (sf::Vector2f)window.getView().getSize();
+
+		sf::Text* hintText = &menu.GetCurrentContext().hintText;
+		hintText->setOrigin(GetTextOrigin(*hintText, { 0.5f, 0.f }));
+		hintText->setPosition(viewSize.x / 2.f, 150.f);
+		window.draw(*hintText);
+
+		menu.Draw(window, viewSize / 2.f, { 0.5f, 0.f });
+	}
+
+}
+#pragma once
+#include "SFML/Graphics.hpp"
+#include "GameStateData.h"
+#include "Menu.h"
+
+namespace ArkanoidGame
+{
+	class Game;
+
+	class GameStateMainMenuData : public GameStateData
+	{
+	public:
+		void Init() override;
+		void HandleWindowEvent(const sf::Event& event) override;
+		void Update(float timeDelta) override;
+		void Draw(sf::RenderWindow& window) override;
+
+	private:
+		sf::Font font;
+		Menu menu;
+	};
+}
+#include "GameStatePauseMenu.h"
+#include "Application.h"
+#include "Game.h"
+#include <assert.h>
+
+namespace ArkanoidGame
+{
+	void GameStatePauseMenuData::Init()
+	{
+		assert(font.loadFromFile(RESOURCES_PATH + "Fonts/Roboto-Regular.ttf"));
+
+		background.setFillColor(sf::Color(0, 0, 0, 128)); // Semi-transparent black
+
+		titleText.setString("Pause");
+		titleText.setFont(font);
+		titleText.setCharacterSize(48);
+		titleText.setFillColor(sf::Color::Red);
+
+		MenuItem resumeItem;
+		resumeItem.text.setString("Return to game");
+		resumeItem.text.setFont(font);
+		resumeItem.text.setCharacterSize(24);
+		resumeItem.onPressCallback = [](MenuItem&) {
+			Application::Instance().GetGame().PopState();
+			};
+
+		MenuItem exitItem;
+		exitItem.text.setString("Exit to main menu");
+		exitItem.text.setFont(font);
+		exitItem.text.setCharacterSize(24);
+		exitItem.onPressCallback = [](MenuItem&) {
+			Application::Instance().GetGame().SwitchStateTo(GameStateType::MainMenu);
+			};
+
+		MenuItem pauseMenu;
+		pauseMenu.childrenOrientation = Orientation::Vertical;
+		pauseMenu.childrenAlignment = Alignment::Middle;
+		pauseMenu.childrens.push_back(resumeItem);
+		pauseMenu.childrens.push_back(exitItem);
+
+		menu.Init(pauseMenu);
+	}
+
+	void GameStatePauseMenuData::HandleWindowEvent(const sf::Event& event)
+	{
+		if (event.type == sf::Event::KeyPressed)
+		{
+			if (event.key.code == sf::Keyboard::Escape)
+			{
+				Application::Instance().GetGame().PopState();
+			}
+
+			if (event.key.code == sf::Keyboard::Enter)
+			{
+				menu.PressOnSelectedItem();
+			}
+
+			Orientation orientation = menu.GetCurrentContext().childrenOrientation;
+			if (event.key.code == sf::Keyboard::Up)
+			{
+				menu.SwitchToPreviousMenuItem();
+			}
+			else if (event.key.code == sf::Keyboard::Down)
+			{
+				menu.SwitchToNextMenuItem();
+			}
+		}
+	}
+
+	void GameStatePauseMenuData::Update(float timeDelta)
+	{
+
+	}
+
+	void GameStatePauseMenuData::Draw(sf::RenderWindow& window)
+	{
+		sf::Vector2f viewSize = (sf::Vector2f)window.getView().getSize();
+		
+		background.setSize(viewSize);
+		window.draw(background);
+
+		titleText.setOrigin(GetTextOrigin(titleText, { 0.5f, 0.f }));
+		titleText.setPosition(viewSize.x / 2.f, 100);
+		window.draw(titleText);
+
+		menu.Draw(window, window.getView().getCenter(), { 0.5f, 0.f });
+	}
+
+}
+#pragma once
+#include <SFML/Graphics.hpp>
+#include "GameStateData.h"
+#include "Menu.h"
+
+namespace ArkanoidGame
+{
+	class Game;
+
+	class GameStatePauseMenuData : public GameStateData
+	{
+	public:
+		void Init() override;
+		void HandleWindowEvent(const sf::Event& event) override;
+		void Update(float timeDelta) override;
+		void Draw(sf::RenderWindow& window) override;
+
+	private:
+		sf::Font font;
+
+		sf::RectangleShape background;
+		sf::Text titleText;
+
+		Menu menu;
+	};
+}
+#include "GameStatePlaying.h"
+#include "Application.h"
+#include "Block.h"
+#include "Game.h"
+#include "Text.h"
+#include "ThreeHitBlock.h"
+
+#include <assert.h>
+#include <sstream>
+
+namespace ArkanoidGame
+{
+	void GameStatePlayingData::Init()
+	{	
+		// Init game resources (terminate if error)
+		assert(font.loadFromFile(FONTS_PATH + "Roboto-Regular.ttf"));
+		assert(gameOverSoundBuffer.loadFromFile(SOUNDS_PATH + "Death.wav"));
+
+		// Init background
+		background.setSize(sf::Vector2f(SCREEN_WIDTH, SCREEN_HEIGHT));
+		background.setPosition(0.f, 0.f);
+		background.setFillColor(sf::Color(0, 0, 0));
+
+		scoreText.setFont(font);
+		scoreText.setCharacterSize(24);
+		scoreText.setFillColor(sf::Color::Yellow);
+
+		inputHintText.setFont(font);
+		inputHintText.setCharacterSize(24);
+		inputHintText.setFillColor(sf::Color::White);
+		inputHintText.setString("Use arrow keys to move, ESC to pause");
+		inputHintText.setOrigin(GetTextOrigin(inputHintText, { 1.f, 0.f }));
+
+		gameObjects.emplace_back(std::make_shared<Platform>(sf::Vector2f({ SCREEN_WIDTH / 2.0, SCREEN_HEIGHT - PLATFORM_HEIGHT / 2.f })));
+		gameObjects.emplace_back(std::make_shared<Ball>(sf::Vector2f({ SCREEN_WIDTH / 2.f, SCREEN_HEIGHT - PLATFORM_HEIGHT - BALL_SIZE / 2.f } )));
+		createBlocks();
+
+		// Init sounds
+		gameOverSound.setBuffer(gameOverSoundBuffer);
+	}
+
+	void GameStatePlayingData::HandleWindowEvent(const sf::Event& event)
+	{
+		if (event.type == sf::Event::KeyPressed)
+		{
+			if (event.key.code == sf::Keyboard::Escape)
+			{
+				Application::Instance().GetGame().PushState(GameStateType::ExitDialog, false);
+			}
+		}
+	}
+
+	void GameStatePlayingData::Update(float timeDelta)
+	{
+		static auto updateFunctor = [timeDelta](auto obj) { obj->Update(timeDelta); };
+
+		std::for_each(gameObjects.begin(), gameObjects.end(), updateFunctor);
+		std::for_each(blocks.begin(), blocks.end(), updateFunctor);
+
+
+		std::shared_ptr <Platform> platform = std::dynamic_pointer_cast<Platform>(gameObjects[0]);
+		std::shared_ptr<Ball> ball = std::dynamic_pointer_cast<Ball>(gameObjects[1]);
+
+		auto isCollision = platform->CheckCollision(ball);
+
+		bool needInverseDirX = false;
+		bool needInverseDirY = false;
+
+
+		bool hasBrokeOneBlock = false;
+		//remove-erase idiom
+		blocks.erase(
+			std::remove_if(blocks.begin(), blocks.end(),
+				[ball, &hasBrokeOneBlock, &needInverseDirX, &needInverseDirY, this](auto block) {
+					if ((!hasBrokeOneBlock) && block->CheckCollision(ball)) {
+						hasBrokeOneBlock = true;
+						const auto ballPos = ball->GetPosition();
+						const auto blockRect = block->GetRect();
+
+						GetBallInverse(ballPos, blockRect, needInverseDirX, needInverseDirY);
+					}
+					return block->IsBroken();
+				}),
+			blocks.end()
+					);
+		if (needInverseDirX) {
+			ball->InvertDirectionX();
+		}
+		if (needInverseDirY) {
+			ball->InvertDirectionY();
+		}
+
+		const bool isGameWin = blocks.size() == 0;
+		const bool isGameOver = !isCollision && ball->GetPosition().y > platform->GetRect().top;
+		Game& game = Application::Instance().GetGame();
+
+		if (isGameWin) {
+			game.PushState(GameStateType::GameWin, false);
+		}
+		else if (isGameOver) {
+			gameOverSound.play();
+			game.PushState(GameStateType::GameOver, false);
+		}
+	}
+
+	void GameStatePlayingData::Draw(sf::RenderWindow& window)
+	{
+		// Draw background
+		window.draw(background);
+
+		static auto drawFunc = [&window](auto block) { block->Draw(window); };
+		// Draw game objects
+		std::for_each(gameObjects.begin(), gameObjects.end(), drawFunc);
+		std::for_each(blocks.begin(), blocks.end(), drawFunc);
+
+		scoreText.setOrigin(GetTextOrigin(scoreText, { 0.f, 0.f }));
+		scoreText.setPosition(10.f, 10.f);
+		window.draw(scoreText);
+
+		sf::Vector2f viewSize = window.getView().getSize();
+		inputHintText.setPosition(viewSize.x - 10.f, 10.f);
+		window.draw(inputHintText);
+	}
+
+	void GameStatePlayingData::createBlocks() 
+	{
+		int row = 0;
+		for (; row < BLOCKS_COUNT_ROWS; ++row) {
+			for (int col = 0; col < BLOCKS_COUNT_IN_ROW; ++col) {
+				blocks.emplace_back(std::make_shared<SmoothDestroyableBlock>(sf::Vector2f({ BLOCK_SHIFT + BLOCK_WIDTH / 2.f + col * (BLOCK_WIDTH + BLOCK_SHIFT), 100.f + row * BLOCK_HEIGHT })));
+			}
+		}
+
+		for (int col = 0; col < 3; ++col) {
+			blocks.emplace_back(std::make_shared<UnbreackableBlock>(sf::Vector2f({ BLOCK_SHIFT + BLOCK_WIDTH / 2.f + col * (BLOCK_WIDTH + BLOCK_SHIFT), 100.f + row * BLOCK_HEIGHT })));
+		}
+		for (int col = 4; col < 7; ++col) {
+			blocks.emplace_back(std::make_shared<ThreeHitBlock>(sf::Vector2f({ BLOCK_SHIFT + BLOCK_WIDTH / 2.f + col * (BLOCK_WIDTH + BLOCK_SHIFT), 100.f + row * BLOCK_HEIGHT })));
+		}
+	}
+
+	void GameStatePlayingData::GetBallInverse(const sf::Vector2f& ballPos, const sf::FloatRect& blockRect, bool& needInverseDirX, bool& needInverseDirY) {
+
+		if (ballPos.y > blockRect.top + blockRect.height)
+		{
+			needInverseDirY = true;
+		}
+		if (ballPos.x < blockRect.left)
+		{
+			needInverseDirX = true;
+		}
+		if (ballPos.x > blockRect.left + blockRect.width)
+		{
+			needInverseDirX = true;
+		}
+	}
+}
+#pragma once
+#include "SFML/Graphics.hpp"
+#include "SFML/Audio.hpp"
+#include "GameStateData.h"
+#include "Platform.h"
+#include "Ball.h"
+
+namespace ArkanoidGame
+{
+	class Game;
+	class Block;
+
+	class GameStatePlayingData : public GameStateData
+	{
+	public:
+		void Init() override;
+		void HandleWindowEvent(const sf::Event& event) override;
+		void Update(float timeDelta) override;
+		void Draw(sf::RenderWindow& window) override;
+
+	private:
+		void createBlocks();
+		void GetBallInverse(const sf::Vector2f& ballPos, const sf::FloatRect& blockRect, bool& needInverseDirX,
+			bool& needInverseDirY);
+
+		// Resources
+		sf::Texture appleTexture;
+		sf::Texture rockTexture;
+		sf::Font font;
+		sf::SoundBuffer eatAppleSoundBuffer;
+		sf::SoundBuffer gameOverSoundBuffer;
+
+		// Game data
+		std::vector<std::shared_ptr<GameObject>> gameObjects;
+		std::vector<std::shared_ptr<Block>> blocks;
+
+		// UI data
+		sf::Text scoreText;
+		sf::Text inputHintText;
+		sf::RectangleShape background;
+
+		// Sounds
+		sf::Sound gameOverSound;
+	};
+}
+#include "GameStateRecords.h"
+#include "Application.h"
+#include "Text.h"
+#include "Game.h"
+#include "GameSettings.h"
+#include <assert.h>
+#include <sstream>
+
+namespace ArkanoidGame
+{
+	void GameStateRecordsData::Init()
+	{
+		assert(font.loadFromFile(RESOURCES_PATH + "Fonts/Roboto-Regular.ttf"));
+
+		titleText.setString("RECORDS");
+		titleText.setFont(font);
+		titleText.setFillColor(sf::Color::Red);
+		titleText.setCharacterSize(48);
+
+		tableTexts.reserve(MAX_RECORDS_TABLE_SIZE);
+
+		const Game& game = Application::Instance().GetGame();
+		std::map<int, std::string> sortedRecordsTable;
+		for (const auto& item : game.GetRecordsTable())
+		{
+			sortedRecordsTable[item.second] = item.first;
+		}
+
+		auto it = sortedRecordsTable.rbegin();
+		for (int i = 0; i < MAX_RECORDS_TABLE_SIZE && it != sortedRecordsTable.rend(); ++i, ++it) // Note, we can do several actions in for action block
+		{
+			tableTexts.emplace_back(); // Create text in place
+			sf::Text& text = tableTexts.back();
+
+			// We can use streams for writing into string and reading from it
+			std::stringstream sstream;
+			sstream << i + 1 << ". " << it->second << ": " << it->first;
+			text.setString(sstream.str());
+			text.setFont(font);
+			text.setFillColor(sf::Color::White);
+			text.setCharacterSize(24);
+		}
+
+		hintText.setString("Press ESC to return back to main menu");
+		hintText.setFont(font);
+		hintText.setFillColor(sf::Color::White);
+		hintText.setCharacterSize(24);
+	}
+
+	void GameStateRecordsData::HandleWindowEvent(const sf::Event& event)
+	{
+		if (event.type == sf::Event::KeyPressed)
+		{
+			if (event.key.code == sf::Keyboard::Escape)
+			{
+				Application::Instance().GetGame().PopState();
+			}
+		}
+	}
+
+	void GameStateRecordsData::Update(float timeDelta)
+	{
+
+	}
+
+	void GameStateRecordsData::Draw(sf::RenderWindow& window)
+	{
+		sf::Vector2f viewSize = window.getView().getSize();
+
+		titleText.setOrigin(GetTextOrigin(titleText, { 0.5f, 0.f }));
+		titleText.setPosition(viewSize.x / 2.f, 50.f);
+		window.draw(titleText);
+
+		// We need to create new vector here as DrawItemsList needs vector of pointers
+		std::vector<sf::Text*> textsList;
+		textsList.reserve(tableTexts.size());
+		for (auto& text : tableTexts)
+		{
+			textsList.push_back(&text);
+		}
+
+		sf::Vector2f tablePosition = { titleText.getGlobalBounds().left, viewSize.y / 2.f };
+		DrawTextList(window, textsList, 10.f, Orientation::Vertical, Alignment::Min, tablePosition, { 0.f, 0.f });
+
+		hintText.setOrigin(GetTextOrigin(hintText, { 0.5f, 1.f }));
+		hintText.setPosition(viewSize.x / 2.f, viewSize.y - 50.f);
+		window.draw(hintText);
+	}
+
+}
+#pragma once
+#include <SFML/Graphics.hpp>
+#include <vector>
+#include "GameStateData.h"
+
+namespace ArkanoidGame
+{
+	class Game;
+
+	class GameStateRecordsData : public GameStateData
+	{
+	public:
+		void Init() override;
+		void HandleWindowEvent(const sf::Event& event) override;
+		void Update(float timeDelta) override;
+		void Draw(sf::RenderWindow& window) override;
+
+	private:
+		// Resources
+		sf::Font font;
+
+		sf::Text titleText;
+		std::vector<sf::Text> tableTexts;
+		sf::Text hintText;
+	};
+}
+#pragma once
+#include "SFML/Graphics.hpp"
+#include <memory>
+
+namespace ArkanoidGame
+{
+	class IDelayedAction
+	{
+	protected:
+		bool isTimerStarted_ = false;
+		float destroyTime_ = 0;
+		float currentTime_ = 0;
+
+		virtual void UpdateTimer(float deltaTime) {
+			if (!isTimerStarted_)
+				return;
+			currentTime_ -= deltaTime;
+			EachTickAction(deltaTime);
+			if (currentTime_ <= 0)
+			{
+				FinalAction();
+				isTimerStarted_ = false;
+			}
+		}
+
+		virtual void FinalAction() = 0;
+		virtual void EachTickAction(float deltaTime) = 0;
+	public:
+		void StartTimer(float destroyTime)
+		{
+			destroyTime_ = destroyTime;
+			currentTime_ = destroyTime;
+			isTimerStarted_ = true;
+		}
+	};
+
+}#include "Menu.h"
+#include <assert.h>
+
+namespace ArkanoidGame
+{
+	void Menu::Init(const MenuItem& item)
+	{
+		rootItem = item;
+
+		InitMenuItem(rootItem);
+		if (!rootItem.childrens.empty()) {
+			SelectMenuItem(rootItem.childrens.front());
+		}
+	}
+	
+	void Menu::InitMenuItem(MenuItem& item)
+	{
+		for (auto& child : item.childrens)
+		{
+			child.parent = &item;
+			InitMenuItem(child);
+		}
+	}
+
+	void Menu::Draw(sf::RenderWindow& window, sf::Vector2f position, sf::Vector2f origin)
+	{
+		MenuItem& expandedItem = GetCurrentContext();
+
+		std::vector<sf::Text*> texts;
+		texts.reserve(expandedItem.childrens.size());
+		for (auto& child : expandedItem.childrens) {
+			if (child.isEnabled) {
+				texts.push_back(&child.text);
+			}
+		}
+
+		DrawTextList(
+			window,
+			texts,
+			expandedItem.childrenSpacing,
+			expandedItem.childrenOrientation,
+			expandedItem.childrenAlignment,
+			position,
+			origin);
+	}
+	
+	void Menu::PressOnSelectedItem()
+	{
+		if (!selectedItem) {
+			return;
+		}
+
+		if (selectedItem->onPressCallback) {
+			selectedItem->onPressCallback(*selectedItem);
+			return;
+		}
+
+		// default behaviour
+		if (!selectedItem->childrens.empty()) {
+			SelectMenuItem(selectedItem->childrens.front());
+		}
+	}
+
+	void Menu::GoBack()
+	{
+		MenuItem& parent = GetCurrentContext();
+		if (&parent != &rootItem) {
+			SelectMenuItem(parent);
+		}
+	}
+
+	void Menu::SwitchToPreviousMenuItem()
+	{
+		if (!selectedItem) {
+			return;
+		}
+		
+		MenuItem* parent = selectedItem->parent;
+		assert(parent); // There always should be parent
+
+		auto it = std::find_if(parent->childrens.begin(), parent->childrens.end(), [this](const auto& item) {
+			return selectedItem == &item;
+		});
+		if (it != parent->childrens.begin()) {
+			SelectMenuItem(*std::prev(it));
+		}
+	}
+
+	void Menu::SwitchToNextMenuItem()
+	{
+		if (!selectedItem) {
+			return;
+		}
+		
+		MenuItem* parent = selectedItem->parent;
+		assert(parent); // There always should be parent
+		
+		auto it = std::find_if(parent->childrens.begin(), parent->childrens.end(), [this](const auto& item) {
+			return selectedItem == &item;
+			});
+		it = std::next(it);
+		if (it != parent->childrens.end()) {
+			SelectMenuItem(*it);
+		}
+	}
+
+	void Menu::SelectMenuItem(MenuItem& item)
+	{
+		assert(&item != &rootItem);
+
+		if (selectedItem == &item)
+		{
+			return;
+		}
+
+		if (!item.isEnabled)
+		{
+			// Don't allow to select disabled item
+			return;
+		}
+
+		if (selectedItem)
+		{
+			selectedItem->text.setFillColor(selectedItem->deselectedColor);
+		}
+
+		selectedItem = &item;
+
+		if (selectedItem)
+		{
+			selectedItem->text.setFillColor(selectedItem->selectedColor);
+		}
+	}
+
+	MenuItem& Menu::GetCurrentContext()
+	{
+		return selectedItem ? *(selectedItem->parent) : rootItem;
+	}
+}
+#pragma once
+#include "SFML/Graphics.hpp"
+#include "Text.h"
+#include <list>
+#include <functional>
+
+
+namespace ArkanoidGame
+{
+	struct MenuItem
+	{
+		sf::Text text;
+		sf::Text hintText; // Visible when child item is selected
+		Orientation childrenOrientation = Orientation::Vertical;
+		Alignment childrenAlignment = Alignment::Min;
+		float childrenSpacing;
+
+		sf::Color selectedColor = sf::Color::Yellow;
+		sf::Color deselectedColor = sf::Color::White;
+
+		bool isEnabled = true;
+		std::vector<MenuItem> childrens;
+
+		std::function<void(MenuItem& item)> onPressCallback;
+
+		MenuItem* parent = nullptr;
+	};
+
+	class Menu
+	{
+	public:
+		void Init(const MenuItem& item);
+
+		void Update(float deltaTime);
+
+		void Draw(sf::RenderWindow& window, sf::Vector2f position, sf::Vector2f origin);
+
+		void PressOnSelectedItem();	// press on selected menu item
+		void GoBack();	// go back to previous menu
+		
+		void SwitchToPreviousMenuItem();
+		void SwitchToNextMenuItem();
+
+		MenuItem& GetCurrentContext();
+
+	private:
+		void InitMenuItem(MenuItem& item);
+		void SelectMenuItem(MenuItem& item);
+
+	private:
+		MenuItem rootItem;
+		MenuItem* selectedItem = nullptr;
+	};
+}
+#include "Platform.h"
+#include "Ball.h"
+#include "GameSettings.h"
+#include "Sprite.h"
+#include <algorithm>
+
+namespace
+{
+	const std::string TEXTURE_ID = "platform";
+}
+
+namespace ArkanoidGame
+{
+	Platform::Platform(const sf::Vector2f& position)
+		: GameObject(TEXTURES_PATH + TEXTURE_ID + ".png", position, PLATFORM_WIDTH, PLATFORM_HEIGHT)
+	{}
+
+	void Platform::Update(float timeDelta)
+	{
+		if (sf::Keyboard::isKeyPressed(sf::Keyboard::Left))
+		{
+			Move(-timeDelta * PLATFORM_SPEED);
+		}
+		else if (sf::Keyboard::isKeyPressed(sf::Keyboard::Right))
+		{
+			Move(timeDelta * PLATFORM_SPEED);
+		}
+	}
+
+	void Platform::Move(float speed)
+	{
+		auto position = sprite.getPosition();
+		position.x = std::clamp(position.x + speed, PLATFORM_WIDTH / 2.f, SCREEN_WIDTH - PLATFORM_WIDTH / 2.f);
+		sprite.setPosition(position);
+	}
+
+	bool Platform::GetCollision(std::shared_ptr<Colladiable> collidable) const
+	{
+		auto ball = std::static_pointer_cast<Ball>(collidable);
+		if (!ball) return false;
+
+		auto sqr = [](float x) {
+			return x * x;
+		};
+		const auto rect = sprite.getGlobalBounds();
+		const auto ballPos = ball->GetPosition();
+		if (ballPos.x < rect.left) {
+			return sqr(ballPos.x - rect.left) + sqr(ballPos.y - rect.top) < sqr(BALL_SIZE / 2.0);
+		}
+
+		if (ballPos.x > rect.left + rect.width) {
+			return sqr(ballPos.x - rect.left - rect.width) + sqr(ballPos.y - rect.top) < sqr(BALL_SIZE / 2.0);
+		}
+
+		return std::fabs(ballPos.y - rect.top) <= BALL_SIZE / 2.0;
+	}
+
+	bool Platform::CheckCollision(std::shared_ptr<Colladiable> collidable) {
+		auto ball = std::static_pointer_cast<Ball>(collidable);
+		if (!ball)
+			return false;
+
+		if (GetCollision(ball)) {
+			auto rect = GetRect();
+			auto ballPosInOlatform = (ball->GetPosition().x - (rect.left + rect.width / 2)) / (rect.width / 2);
+			ball->ChangeAngle(90 - 20 * ballPosInOlatform);
+			return true;
+		}
+		return false;
+	}
+}#pragma once
+#include "SFML/Graphics.hpp"
+#include "GameObject.h"
+#include "Collidable.h"
+
+namespace ArkanoidGame
+{
+	class Platform : public GameObject, public Colladiable
+	{
+	public:
+		Platform(const sf::Vector2f& position);
+		void Update(float timeDelta) override;
+		
+		bool GetCollision(std::shared_ptr<Colladiable> collidable) const override;
+		void OnHit() override {}
+		bool CheckCollision(std::shared_ptr<Colladiable> collidable) override;
+	private:
+		void Move(float speed);
+	};
+}#pragma once
+
+#include <random>
+
+template <bool is_integral, typename T>
+struct uniform_distribution_selector;
+
+template <typename T>
+struct uniform_distribution_selector<true, T> {
+    using type = typename std::uniform_int_distribution<T>;
+};
+
+template <typename T>
+struct uniform_distribution_selector<false, T> {
+    using type = typename std::uniform_real_distribution<T>;
+};
+
+template <typename T>
+T random(T lower = T(0), T higher = T(99)) {
+    if (lower == higher) {
+        return lower;
+    }
+    if (lower > higher) {
+        return lower;
+    }
+
+    using uniform_distribution_type = typename uniform_distribution_selector<std::is_integral<T>::value, T>::type;
+
+    uniform_distribution_type distribution(lower, higher);
+    static std::mt19937 engine;
+
+    return distribution(engine);
+}
+
+#include "Sprite.h"
+#include "GameSettings.h"
+
+
+namespace ArkanoidGame
+{
+	void InitSprite(sf::Sprite& sprite, float desiredWidth, float desiredHeight, const sf::Texture& texture)
+	{
+		sprite.setTexture(texture);
+		SetSpriteRelativeOrigin(sprite, 0.5f, 0.5f);
+		SetSpriteSize(sprite, desiredWidth, desiredHeight);
+	}
+
+	void DrawSprite(const sf::Sprite& sprite, sf::RenderWindow& window)
+	{
+		window.draw(sprite);
+	}
+
+	sf::Vector2f GetRandomSpritePositionInRectangle(const sf::Sprite& sprite, const sf::FloatRect& rect)
+	{
+		sf::Vector2f result;
+		const auto spriteWidth = sprite.getGlobalBounds().width;
+		const auto spriteHeight = sprite.getGlobalBounds().height;
+		result.x = rand() / (float)RAND_MAX * (rect.width - 2 * spriteWidth) + rect.left + spriteWidth;
+		result.y = rand() / (float)RAND_MAX * (rect.height - 2 * spriteHeight) + rect.top + spriteHeight;
+		return result;
+	}
+
+	void SetSpriteSize(sf::Sprite& sprite, float desiredWidth, float desiredHeight)
+	{
+		sf::FloatRect spriteRect = sprite.getGlobalBounds();
+		sf::Vector2f scale = { desiredWidth / spriteRect.width, desiredHeight / spriteRect.height };
+		sprite.setScale(scale);
+	}
+
+	void SetSpriteRelativeOrigin(sf::Sprite& sprite, float originX, float originY)
+	{
+		sf::FloatRect spriteRect = sprite.getGlobalBounds();
+		sprite.setOrigin(originX * spriteRect.width, originY * spriteRect.height);
+	}
+
+	void SetSpriteRandomPosition(sf::Sprite& sprite, const sf::FloatRect& rect, const std::list<sf::Sprite>& collection)
+	{
+		do {
+			const auto newPosition = GetRandomSpritePositionInRectangle(sprite, rect);
+			sprite.setPosition(newPosition);
+		} while (FullCheckCollisions(collection.begin(), collection.end(), sprite));
+	}
+
+	bool CheckSpriteIntersection(const sf::Sprite& sprite1, const sf::Sprite& sprite2) {
+		const auto distance = sprite1.getPosition() - sprite2.getPosition();
+		if (sqrtf(distance.x * distance.x + distance.y * distance.y) * 2 < sprite1.getGlobalBounds().width + sprite2.getGlobalBounds().width) {
+ 			return true;
+		}
+		return false;
+	}
+
+	sf::Vector2f GetVectorBetweenSprites(const sf::Sprite& spriteFrom, const sf::Sprite& spriteTo) {
+		const auto result = spriteTo.getPosition() - spriteFrom.getPosition();
+		return result;
+	}
+
+	float GetManhattanDistanceBetweenSprites(const sf::Sprite& spriteFrom, const sf::Sprite& spriteTo) {
+		const auto result = spriteTo.getPosition() - spriteFrom.getPosition();
+		return std::fabs(result.x) + std::fabs(result.y);
+	}
+}
+#pragma once
+#include <SFML/Graphics.hpp>
+#include "GameSettings.h"
+#include <list>
+
+namespace ArkanoidGame
+{
+	void InitSprite(sf::Sprite& sprite, float desiredWidth, float desiredHeight, const sf::Texture& texture);
+	void SetSpriteSize(sf::Sprite& sprite, float desiredWidth, float desiredHeight);
+	void SetSpriteRelativeOrigin(sf::Sprite& sprite, float originX, float originY);
+
+	/*
+	* The sprite is set a random position inside the rect
+	* It should not intersect with the collection of sprites
+	*/
+	void SetSpriteRandomPosition(sf::Sprite& sprite, const sf::FloatRect& rect, const std::list<sf::Sprite>& collection);
+
+	sf::Vector2f GetRandomSpritePositionInRectangle(const sf::Sprite& sprite, const sf::FloatRect& rect);
+
+	void DrawSprite(const sf::Sprite& sprite, sf::RenderWindow& window);
+	template<class InputIt>
+	void DrawSprites(InputIt first, const InputIt last, sf::RenderWindow& window) {
+		for (; first != last; ++first) {
+			DrawSprite(*first, window);
+		}
+	}
+	
+	sf::Vector2f GetVectorBetweenSprites(const sf::Sprite& spriteFrom, const sf::Sprite& spriteTo);
+	float GetManhattanDistanceBetweenSprites(const sf::Sprite& spriteFrom, const sf::Sprite& spriteTo);
+
+	bool CheckSpriteIntersection(const sf::Sprite& sprite1, const sf::Sprite& sprite2);	
+	
+	template<class InputIt>
+	bool FullCheckCollisions(InputIt first, const InputIt last, const sf::Sprite& sprite) {
+		for (; first != last; ++first) {
+			if (CheckSpriteIntersection(*first, sprite)) {
+				return true;
+			}
+		}
+		return false;
+	}
+}
+#include "Text.h"
+
+namespace ArkanoidGame
+{
+	sf::Vector2f GetTextOrigin(const sf::Text& text, const sf::Vector2f& relativePosition)
+	{
+		sf::FloatRect textSize = text.getLocalBounds();
+		return {
+			(textSize.left + textSize.width) * relativePosition.x,
+			(textSize.top + textSize.height) * relativePosition.y,
+		};
+	}
+
+	void DrawTextList(sf::RenderWindow& window, const std::vector<sf::Text*>& items, float spacing, Orientation orientation, Alignment alignment, const sf::Vector2f& position, const sf::Vector2f& origin)
+	{
+		sf::FloatRect totalRect;
+		// Calculate total height/width of all texts
+		for (auto it = items.begin(); it != items.end(); ++it)
+		{
+			sf::FloatRect itemRect = (*it)->getGlobalBounds();
+
+			if (orientation == Orientation::Horizontal)
+			{
+				totalRect.width += itemRect.width + (it != items.end() - 1 ? spacing : 0.f);
+				totalRect.height = std::max(totalRect.height, itemRect.height);
+			}
+			else
+			{
+				totalRect.width = std::max(totalRect.width, itemRect.width);
+				totalRect.height += itemRect.height + (it != items.end() - 1 ? spacing : 0.f);
+			}
+		}
+
+		totalRect.left = position.x - origin.x * totalRect.width;
+		totalRect.top = position.y - origin.y * totalRect.height;
+		sf::Vector2f currentPos = { totalRect.left, totalRect.top };
+		
+		for (auto it = items.begin(); it != items.end(); ++it)
+		{
+			sf::FloatRect itemRect = (*it)->getGlobalBounds();
+			sf::Vector2f itemOrigin;
+
+			if (orientation == Orientation::Horizontal)
+			{
+				itemOrigin.y = alignment == Alignment::Min ? 0.f : alignment == Alignment::Middle ? 0.5f : 1.f;
+				itemOrigin.x = 0.f;
+				currentPos.y = totalRect.top + itemOrigin.y * totalRect.height;
+			}
+			else
+			{
+				itemOrigin.y = 0.f;
+				itemOrigin.x = alignment == Alignment::Min ? 0.f : alignment == Alignment::Middle ? 0.5f : 1.f;
+				currentPos.x = totalRect.left + itemOrigin.x * totalRect.width;
+			}
+			
+			(*it)->setOrigin(GetTextOrigin(**it, itemOrigin));
+			(*it)->setPosition(currentPos);
+			window.draw(**it);
+
+			if (orientation == Orientation::Horizontal)
+			{
+				currentPos.x += itemRect.width + spacing;
+			}
+			else
+			{
+				currentPos.y += itemRect.height + spacing;
+			}
+
+			
+		}
+	}
+}
+#pragma once
+#include <SFML/Graphics.hpp>
+#include "Vector.h"
+
+namespace ArkanoidGame
+{
+	// Helper method for organizing text items
+	enum class Orientation
+	{
+		Horizontal,
+		Vertical
+	};
+
+	enum class Alignment
+	{
+		Min, // Left or Top
+		Middle,
+		Max // Right or Bottom
+	};
+
+	sf::Vector2f GetTextOrigin(const sf::Text& text, const sf::Vector2f& relativePosition);
+	void DrawTextList(sf::RenderWindow& window, const std::vector<sf::Text*>& items, float spacing, Orientation orientation, Alignment alignment, const sf::Vector2f& position, const sf::Vector2f& origin);
+}
+#include "ThreeHitBlock.h"
+#include "GameSettings.h"
+
+
+namespace ArkanoidGame {
+
+	ThreeHitBlock::ThreeHitBlock(const sf::Vector2f& position)
+		: SmoothDestroyableBlock(position, sf::Color::Magenta)
+	{
+		hitCount = 3;
+	}
+
+	void ThreeHitBlock::OnHit() {
+		--hitCount;
+		StageChange();
+
+		if (hitCount == 0) {
+			hitCount = 1;
+			StartTimer(BREAK_DELAY);
+		}
+	}
+
+	void ThreeHitBlock::StageChange() {
+
+		if (hitCount == 2)
+			sprite.setColor(sf::Color::Red);
+		if (hitCount < 2) {
+			sprite.setColor(sf::Color::Green);
+			color = sf::Color::Green;
+		}
+	}
+}
+#pragma once
+#include <memory>
+
+#include "Block.h"
+#include "Collidable.h"
+
+
+namespace ArkanoidGame {
+	class ThreeHitBlock : public SmoothDestroyableBlock
+	{
+	public:
+		ThreeHitBlock(const sf::Vector2f& position);
+
+	private:
+		void OnHit() override;
+
+		void StageChange();
+
+
+	};
+}
+
+#pragma once
+
+namespace ArkanoidGame
+{
+	template<typename T>
+	struct Vector2D
+	{
+		T x = (T)0;
+		T y = (T)0;
+	};
+
+	using Vector2Df = Vector2D<float>;
+	using Vector2Di = Vector2D<int>;
+	using Position = Vector2Df;
+
+	template<typename T>
+	Vector2D<T> operator+(const Vector2D<T>& lhs, const Vector2D<T>& rhs)
+	{
+		return { lhs.x + rhs.x, lhs.y + rhs.y };
+	}
+
+	template<typename T>
+	Vector2D<T> operator-(const Vector2D<T>& lhs, const Vector2D<T>& rhs)
+	{
+		return { lhs.x - rhs.x, lhs.y - rhs.y };
+	}
+
+	template<typename T>
+	bool operator==(const Vector2D<T>& lhs, const Vector2D<T>& rhs)
+	{
+		return lhs.x == rhs.x && lhs.y == rhs.y;
+	}
+
+	template<typename T>
+	float GetVectorLength(const Vector2D<T>& vector)
+	{
+		return sqrtf(vector.x * vector.x + vector.y * vector.y);
+	}
+
+	// This complex template allows us to convert any vector type to any other vector type (like our Vector2D to SFML's Vector and vice versa)
+	template<typename U, typename V>
+	U Convert(const V& v)
+	{
+		// decltype deduces type from expression
+		return { static_cast<decltype(U::x)>(v.x), static_cast<decltype(U::y)>(v.y) };
+	}
+}
+
+////////////////////////////////////////////////////////////
+// Headers
+////////////////////////////////////////////////////////////
+#include <SFML/Network.hpp>
+#include <fstream>
+#include <iostream>
+
+
+////////////////////////////////////////////////////////////
+/// Print a FTP response into a standard output stream
+///
+////////////////////////////////////////////////////////////
+std::ostream& operator <<(std::ostream& stream, const sf::Ftp::Response& response)
+{
+    return stream << response.getStatus() << response.getMessage();
+}
+
+
+////////////////////////////////////////////////////////////
+/// Entry point of application
+///
+/// \return Application exit code
+///
+////////////////////////////////////////////////////////////
+int main()
+{
+    // Choose the server address
+    sf::IpAddress address;
+    do
+    {
+        std::cout << "Enter the FTP server address: ";
+        std::cin  >> address;
+    }
+    while (address == sf::IpAddress::None);
+
+    // Connect to the server
+    sf::Ftp server;
+    sf::Ftp::Response connectResponse = server.connect(address);
+    std::cout << connectResponse << std::endl;
+    if (!connectResponse.isOk())
+        return EXIT_FAILURE;
+
+    // Ask for user name and password
+    std::string user, password;
+    std::cout << "User name: ";
+    std::cin  >> user;
+    std::cout << "Password: ";
+    std::cin  >> password;
+
+    // Login to the server
+    sf::Ftp::Response loginResponse = server.login(user, password);
+    std::cout << loginResponse << std::endl;
+    if (!loginResponse.isOk())
+        return EXIT_FAILURE;
+
+    // Main menu
+    int choice = 0;
+    do
+    {
+        // Main FTP menu
+        std::cout << std::endl;
+        std::cout << "Choose an action:"                      << std::endl;
+        std::cout << "1. Print working directory"             << std::endl;
+        std::cout << "2. Print contents of working directory" << std::endl;
+        std::cout << "3. Change directory"                    << std::endl;
+        std::cout << "4. Create directory"                    << std::endl;
+        std::cout << "5. Delete directory"                    << std::endl;
+        std::cout << "6. Rename file"                         << std::endl;
+        std::cout << "7. Remove file"                         << std::endl;
+        std::cout << "8. Download file"                       << std::endl;
+        std::cout << "9. Upload file"                         << std::endl;
+        std::cout << "0. Disconnect"                          << std::endl;
+        std::cout << std::endl;
+
+        std::cout << "Your choice: ";
+        std::cin  >> choice;
+        std::cout << std::endl;
+
+        switch (choice)
+        {
+            default:
+            {
+                // Wrong choice
+                std::cout << "Invalid choice!" << std::endl;
+                std::cin.clear();
+                std::cin.ignore(10000, '\n');
+                break;
+            }
+
+            case 1:
+            {
+                // Print the current server directory
+                sf::Ftp::DirectoryResponse response = server.getWorkingDirectory();
+                std::cout << response << std::endl;
+                std::cout << "Current directory is " << response.getDirectory() << std::endl;
+                break;
+            }
+
+            case 2:
+            {
+                // Print the contents of the current server directory
+                sf::Ftp::ListingResponse response = server.getDirectoryListing();
+                std::cout << response << std::endl;
+                const std::vector<std::string>& names = response.getListing();
+                for (std::vector<std::string>::const_iterator it = names.begin(); it != names.end(); ++it)
+                    std::cout << *it << std::endl;
+                break;
+            }
+
+            case 3:
+            {
+                // Change the current directory
+                std::string directory;
+                std::cout << "Choose a directory: ";
+                std::cin  >> directory;
+                std::cout << server.changeDirectory(directory) << std::endl;
+                break;
+            }
+
+            case 4:
+            {
+                // Create a new directory
+                std::string directory;
+                std::cout << "Name of the directory to create: ";
+                std::cin  >> directory;
+                std::cout << server.createDirectory(directory) << std::endl;
+                break;
+            }
+
+            case 5:
+            {
+                // Remove an existing directory
+                std::string directory;
+                std::cout << "Name of the directory to remove: ";
+                std::cin  >> directory;
+                std::cout << server.deleteDirectory(directory) << std::endl;
+                break;
+            }
+
+            case 6:
+            {
+                // Rename a file
+                std::string source, destination;
+                std::cout << "Name of the file to rename: ";
+                std::cin  >> source;
+                std::cout << "New name: ";
+                std::cin  >> destination;
+                std::cout << server.renameFile(source, destination) << std::endl;
+                break;
+            }
+
+            case 7:
+            {
+                // Remove an existing directory
+                std::string filename;
+                std::cout << "Name of the file to remove: ";
+                std::cin  >> filename;
+                std::cout << server.deleteFile(filename) << std::endl;
+                break;
+            }
+
+            case 8:
+            {
+                // Download a file from server
+                std::string filename, directory;
+                std::cout << "Filename of the file to download (relative to current directory): ";
+                std::cin  >> filename;
+                std::cout << "Directory to download the file to: ";
+                std::cin  >> directory;
+                std::cout << server.download(filename, directory) << std::endl;
+                break;
+            }
+
+            case 9:
+            {
+                // Upload a file to server
+                std::string filename, directory;
+                std::cout << "Path of the file to upload (absolute or relative to working directory): ";
+                std::cin  >> filename;
+                std::cout << "Directory to upload the file to (relative to current directory): ";
+                std::cin  >> directory;
+                std::cout << server.upload(filename, directory) << std::endl;
+                break;
+            }
+
+            case 0:
+            {
+                // Disconnect
+                break;
+            }
+        }
+
+    } while (choice != 0);
+
+    // Disconnect from the server
+    std::cout << "Disconnecting from server..." << std::endl;
+    std::cout << server.disconnect() << std::endl;
+
+    // Wait until the user presses 'enter' key
+    std::cout << "Press enter to exit..." << std::endl;
+    std::cin.ignore(10000, '\n');
+    std::cin.ignore(10000, '\n');
+
+    return EXIT_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////
+// Headers
+////////////////////////////////////////////////////////////
+#define STB_PERLIN_IMPLEMENTATION
+#include "stb_perlin.h"
+#include <SFML/Graphics.hpp>
+#include <vector>
+#include <deque>
+#include <sstream>
+#include <algorithm>
+#include <cstring>
+#include <cmath>
+
+
+namespace
+{
+    // Width and height of the application window
+    const unsigned int windowWidth = 800;
+    const unsigned int windowHeight = 600;
+
+    // Resolution of the generated terrain
+    const unsigned int resolutionX = 800;
+    const unsigned int resolutionY = 600;
+
+    // Thread pool parameters
+    const unsigned int threadCount = 4;
+    const unsigned int blockCount = 32;
+
+    struct WorkItem
+    {
+        sf::Vertex* targetBuffer;
+        unsigned int index;
+    };
+
+    std::deque<WorkItem> workQueue;
+    std::vector<sf::Thread*> threads;
+    int pendingWorkCount = 0;
+    bool workPending = true;
+    bool bufferUploadPending = false;
+    sf::Mutex workQueueMutex;
+
+    struct Setting
+    {
+        const char* name;
+        float* value;
+    };
+
+    // Terrain noise parameters
+    const int perlinOctaves = 3;
+
+    float perlinFrequency = 7.0f;
+    float perlinFrequencyBase = 4.0f;
+
+    // Terrain generation parameters
+    float heightBase = 0.0f;
+    float edgeFactor = 0.9f;
+    float edgeDropoffExponent = 1.5f;
+
+    float snowcapHeight = 0.6f;
+
+    // Terrain lighting parameters
+    float heightFactor = windowHeight / 2.0f;
+    float heightFlatten = 3.0f;
+    float lightFactor = 0.7f;
+}
+
+
+// Forward declarations of the functions we define further down
+void threadFunction();
+void generateTerrain(sf::Vertex* vertexBuffer);
+
+
+////////////////////////////////////////////////////////////
+/// Entry point of application
+///
+/// \return Application exit code
+///
+////////////////////////////////////////////////////////////
+int main()
+{
+    // Create the window of the application
+    sf::RenderWindow window(sf::VideoMode(windowWidth, windowHeight), "SFML Island",
+                            sf::Style::Titlebar | sf::Style::Close);
+    window.setVerticalSyncEnabled(true);
+
+    sf::Font font;
+    if (!font.loadFromFile("resources/sansation.ttf"))
+        return EXIT_FAILURE;
+
+    // Create all of our graphics resources
+    sf::Text hudText;
+    sf::Text statusText;
+    sf::Shader terrainShader;
+    sf::RenderStates terrainStates(&terrainShader);
+    sf::VertexBuffer terrain(sf::Triangles, sf::VertexBuffer::Static);
+
+    // Set up our text drawables
+    statusText.setFont(font);
+    statusText.setCharacterSize(28);
+    statusText.setFillColor(sf::Color::White);
+    statusText.setOutlineColor(sf::Color::Black);
+    statusText.setOutlineThickness(2.0f);
+
+    hudText.setFont(font);
+    hudText.setCharacterSize(14);
+    hudText.setFillColor(sf::Color::White);
+    hudText.setOutlineColor(sf::Color::Black);
+    hudText.setOutlineThickness(2.0f);
+    hudText.setPosition(5.0f, 5.0f);
+
+    // Staging buffer for our terrain data that we will upload to our VertexBuffer
+    std::vector<sf::Vertex> terrainStagingBuffer;
+
+    // Check whether the prerequisites are suppprted
+    bool prerequisitesSupported = sf::VertexBuffer::isAvailable() && sf::Shader::isAvailable();
+
+    // Set up our graphics resources and set the status text accordingly
+    if (!prerequisitesSupported)
+    {
+        statusText.setString("Shaders and/or Vertex Buffers Unsupported");
+    }
+    else if (!terrainShader.loadFromFile("resources/terrain.vert", "resources/terrain.frag"))
+    {
+        prerequisitesSupported = false;
+
+        statusText.setString("Failed to load shader program");
+    }
+    else
+    {
+        // Start up our thread pool
+        for (unsigned int i = 0; i < threadCount; i++)
+        {
+            threads.push_back(new sf::Thread(threadFunction));
+            threads.back()->launch();
+        }
+
+        // Create our VertexBuffer with enough space to hold all the terrain geometry
+        terrain.create(resolutionX * resolutionY * 6);
+
+        // Resize the staging buffer to be able to hold all the terrain geometry
+        terrainStagingBuffer.resize(resolutionX * resolutionY * 6);
+
+        // Generate the initial terrain
+        generateTerrain(&terrainStagingBuffer[0]);
+
+        statusText.setString("Generating Terrain...");
+    }
+
+    // Center the status text
+    statusText.setPosition((windowWidth - statusText.getLocalBounds().width) / 2.f, (windowHeight - statusText.getLocalBounds().height) / 2.f);
+
+    // Set up an array of pointers to our settings for arrow navigation
+    Setting settings[] =
+    {
+        {"perlinFrequency",     &perlinFrequency},
+        {"perlinFrequencyBase", &perlinFrequencyBase},
+        {"heightBase",          &heightBase},
+        {"edgeFactor",          &edgeFactor},
+        {"edgeDropoffExponent", &edgeDropoffExponent},
+        {"snowcapHeight",       &snowcapHeight},
+        {"heightFactor",        &heightFactor},
+        {"heightFlatten",       &heightFlatten},
+        {"lightFactor",         &lightFactor}
+    };
+
+    const int settingCount = 9;
+    int currentSetting = 0;
+
+    std::ostringstream osstr;
+    sf::Clock clock;
+
+    while (window.isOpen())
+    {
+        // Handle events
+        sf::Event event;
+        while (window.pollEvent(event))
+        {
+            // Window closed or escape key pressed: exit
+            if ((event.type == sf::Event::Closed) ||
+               ((event.type == sf::Event::KeyPressed) && (event.key.code == sf::Keyboard::Escape)))
+            {
+                window.close();
+                break;
+            }
+
+            // Arrow key pressed:
+            if (prerequisitesSupported && (event.type == sf::Event::KeyPressed))
+            {
+                switch (event.key.code)
+                {
+                    case sf::Keyboard::Return: generateTerrain(&terrainStagingBuffer[0]); break;
+                    case sf::Keyboard::Down:   currentSetting = (currentSetting + 1) % settingCount; break;
+                    case sf::Keyboard::Up:     currentSetting = (currentSetting + settingCount - 1) % settingCount; break;
+                    case sf::Keyboard::Left:   *(settings[currentSetting].value) -= 0.1f; break;
+                    case sf::Keyboard::Right:  *(settings[currentSetting].value) += 0.1f; break;
+                    default: break;
+                }
+            }
+        }
+
+        // Clear, draw graphics objects and display
+        window.clear();
+
+        window.draw(statusText);
+
+        if (prerequisitesSupported)
+        {
+            {
+                sf::Lock lock(workQueueMutex);
+
+                // Don't bother updating/drawing the VertexBuffer while terrain is being regenerated
+                if (!pendingWorkCount)
+                {
+                    // If there is new data pending to be uploaded to the VertexBuffer, do it now
+                    if (bufferUploadPending)
+                    {
+                        terrain.update(&terrainStagingBuffer[0]);
+                        bufferUploadPending = false;
+                    }
+
+                    terrainShader.setUniform("lightFactor", lightFactor);
+                    window.draw(terrain, terrainStates);
+                }
+            }
+
+            // Update and draw the HUD text
+            osstr.str("");
+            osstr << "Frame:  " << clock.restart().asMilliseconds() << "ms\n"
+                  << "perlinOctaves:  " << perlinOctaves << "\n\n"
+                  << "Use the arrow keys to change the values.\nUse the return key to regenerate the terrain.\n\n";
+
+            for (int i = 0; i < settingCount; ++i)
+                osstr << ((i == currentSetting) ? ">>  " : "       ") << settings[i].name << ":  " << *(settings[i].value) << "\n";
+
+            hudText.setString(osstr.str());
+
+            window.draw(hudText);
+        }
+
+        // Display things on screen
+        window.display();
+    }
+
+    // Shut down our thread pool
+    {
+        sf::Lock lock(workQueueMutex);
+        workPending = false;
+    }
+
+    while (!threads.empty())
+    {
+        threads.back()->wait();
+        delete threads.back();
+        threads.pop_back();
+    }
+
+    return EXIT_SUCCESS;
+}
+
+
+////////////////////////////////////////////////////////////
+/// Get the terrain elevation at the given coordinates.
+///
+////////////////////////////////////////////////////////////
+float getElevation(float x, float y)
+{
+    x = x / resolutionX - 0.5f;
+    y = y / resolutionY - 0.5f;
+
+    float elevation = 0.0f;
+
+    for (int i = 0; i < perlinOctaves; i++)
+    {
+        elevation += stb_perlin_noise3(
+            x * perlinFrequency * std::pow(perlinFrequencyBase, i),
+            y * perlinFrequency * std::pow(perlinFrequencyBase, i),
+            0, 0, 0, 0
+        ) * std::pow(perlinFrequencyBase, -i);
+    }
+
+    elevation = (elevation + 1.f) / 2.f;
+
+    float distance = 2.0f * std::sqrt(x * x + y * y);
+    elevation = (elevation + heightBase) * (1.0f - edgeFactor * std::pow(distance, edgeDropoffExponent));
+    elevation = std::min(std::max(elevation, 0.0f), 1.0f);
+
+    return elevation;
+}
+
+
+////////////////////////////////////////////////////////////
+/// Get the terrain moisture at the given coordinates.
+///
+////////////////////////////////////////////////////////////
+float getMoisture(float x, float y)
+{
+    x = x / resolutionX - 0.5f;
+    y = y / resolutionY - 0.5f;
+
+    float moisture = stb_perlin_noise3(
+        x * 4.f + 0.5f,
+        y * 4.f + 0.5f,
+        0, 0, 0, 0
+    );
+
+    return (moisture + 1.f) / 2.f;
+}
+
+
+////////////////////////////////////////////////////////////
+/// Get the lowlands terrain color for the given moisture.
+///
+////////////////////////////////////////////////////////////
+sf::Color getLowlandsTerrainColor(float moisture)
+{
+    sf::Color color =
+        moisture < 0.27f ? sf::Color(240, 240, 180) :
+        moisture < 0.3f ? sf::Color(240 - 240 * (moisture - 0.27f) / 0.03f, 240 - 40 * (moisture - 0.27f) / 0.03f, 180 - 180 * (moisture - 0.27f) / 0.03f) :
+        moisture < 0.4f ? sf::Color(0, 200, 0) :
+        moisture < 0.48f ? sf::Color(0, 200 - 40 * (moisture - 0.4f) / 0.08f, 0) :
+        moisture < 0.6f ? sf::Color(0, 160, 0) :
+        moisture < 0.7f ? sf::Color(34 * (moisture - 0.6f) / 0.1f, 160 - 60 * (moisture - 0.6f) / 0.1f, 34 * (moisture - 0.6f) / 0.1f) :
+        sf::Color(34, 100, 34);
+
+    return color;
+}
+
+
+////////////////////////////////////////////////////////////
+/// Get the highlands terrain color for the given elevation
+/// and moisture.
+///
+////////////////////////////////////////////////////////////
+sf::Color getHighlandsTerrainColor(float elevation, float moisture)
+{
+    sf::Color lowlandsColor = getLowlandsTerrainColor(moisture);
+
+    sf::Color color =
+        moisture < 0.6f ? sf::Color(112, 128, 144) :
+        sf::Color(112 + 110 * (moisture - 0.6f) / 0.4f, 128 + 56 * (moisture - 0.6f) / 0.4f, 144 - 9 * (moisture - 0.6f) / 0.4f);
+
+    float factor = std::min((elevation - 0.4f) / 0.1f, 1.f);
+
+    color.r = lowlandsColor.r * (1.f - factor) + color.r * factor;
+    color.g = lowlandsColor.g * (1.f - factor) + color.g * factor;
+    color.b = lowlandsColor.b * (1.f - factor) + color.b * factor;
+
+    return color;
+}
+
+
+////////////////////////////////////////////////////////////
+/// Get the snowcap terrain color for the given elevation
+/// and moisture.
+///
+////////////////////////////////////////////////////////////
+sf::Color getSnowcapTerrainColor(float elevation, float moisture)
+{
+    sf::Color highlandsColor = getHighlandsTerrainColor(elevation, moisture);
+
+    sf::Color color = sf::Color::White;
+
+    float factor = std::min((elevation - snowcapHeight) / 0.05f, 1.f);
+
+    color.r = highlandsColor.r * (1.f - factor) + color.r * factor;
+    color.g = highlandsColor.g * (1.f - factor) + color.g * factor;
+    color.b = highlandsColor.b * (1.f - factor) + color.b * factor;
+
+    return color;
+}
+
+
+////////////////////////////////////////////////////////////
+/// Get the terrain color for the given elevation and
+/// moisture.
+///
+////////////////////////////////////////////////////////////
+sf::Color getTerrainColor(float elevation, float moisture)
+{
+    sf::Color color =
+        elevation < 0.11f ? sf::Color(0, 0, elevation / 0.11f * 74.f + 181.0f) :
+        elevation < 0.14f ? sf::Color(std::pow((elevation - 0.11f) / 0.03f, 0.3f) * 48.f, std::pow((elevation - 0.11f) / 0.03f, 0.3f) * 48.f, 255) :
+        elevation < 0.16f ? sf::Color((elevation - 0.14f) * 128.f / 0.02f + 48.f, (elevation - 0.14f) * 128.f / 0.02f + 48.f, 127.0f + (0.16f - elevation) * 128.f / 0.02f) :
+        elevation < 0.17f ? sf::Color(240, 230, 140) :
+        elevation < 0.4f ? getLowlandsTerrainColor(moisture) :
+        elevation < snowcapHeight ? getHighlandsTerrainColor(elevation, moisture) :
+        getSnowcapTerrainColor(elevation, moisture);
+
+        return color;
+}
+
+
+////////////////////////////////////////////////////////////
+/// Compute a compressed representation of the surface
+/// normal based on the given coordinates, and the elevation
+/// of the 4 adjacent neighbours.
+///
+////////////////////////////////////////////////////////////
+sf::Vector2f computeNormal(int x, int y, float left, float right, float bottom, float top)
+{
+    sf::Vector3f deltaX(1, 0, (std::pow(right, heightFlatten) - std::pow(left, heightFlatten)) * heightFactor);
+    sf::Vector3f deltaY(0, 1, (std::pow(top, heightFlatten) - std::pow(bottom, heightFlatten)) * heightFactor);
+
+    sf::Vector3f crossProduct(
+        deltaX.y * deltaY.z - deltaX.z * deltaY.y,
+        deltaX.z * deltaY.x - deltaX.x * deltaY.z,
+        deltaX.x * deltaY.y - deltaX.y * deltaY.x
+    );
+
+    // Scale cross product to make z component 1.0f so we can drop it
+    crossProduct /= crossProduct.z;
+
+    // Return "compressed" normal
+    return sf::Vector2f(crossProduct.x, crossProduct.y);
+}
+
+
+////////////////////////////////////////////////////////////
+/// Process a terrain generation work item. Use the vector
+/// of vertices as scratch memory and upload the data to
+/// the vertex buffer when done.
+///
+////////////////////////////////////////////////////////////
+void processWorkItem(std::vector<sf::Vertex>& vertices, const WorkItem& workItem)
+{
+    unsigned int rowBlockSize = (resolutionY / blockCount) + 1;
+    unsigned int rowStart = rowBlockSize * workItem.index;
+
+    if (rowStart >= resolutionY)
+        return;
+
+    unsigned int rowEnd = std::min(rowStart + rowBlockSize, resolutionY);
+    unsigned int rowCount = rowEnd - rowStart;
+
+    const float scalingFactorX = static_cast<float>(windowWidth) / static_cast<float>(resolutionX);
+    const float scalingFactorY = static_cast<float>(windowHeight) / static_cast<float>(resolutionY);
+
+    for (unsigned int y = rowStart; y < rowEnd; y++)
+    {
+        for (int x = 0; x < resolutionX; x++)
+        {
+            int arrayIndexBase = ((y - rowStart) * resolutionX + x) * 6;
+
+            // Top left corner (first triangle)
+            if (x > 0)
+            {
+                vertices[arrayIndexBase + 0] = vertices[arrayIndexBase - 6 + 5];
+            }
+            else if (y > rowStart)
+            {
+                vertices[arrayIndexBase + 0] = vertices[arrayIndexBase - resolutionX * 6 + 1];
+            }
+            else
+            {
+                vertices[arrayIndexBase + 0].position = sf::Vector2f(x * scalingFactorX, y * scalingFactorY);
+                vertices[arrayIndexBase + 0].color = getTerrainColor(getElevation(x, y), getMoisture(x, y));
+                vertices[arrayIndexBase + 0].texCoords = computeNormal(x, y, getElevation(x - 1, y), getElevation(x + 1, y), getElevation(x, y + 1), getElevation(x, y - 1));
+            }
+
+            // Bottom left corner (first triangle)
+            if (x > 0)
+            {
+                vertices[arrayIndexBase + 1] = vertices[arrayIndexBase - 6 + 2];
+            }
+            else
+            {
+                vertices[arrayIndexBase + 1].position = sf::Vector2f(x * scalingFactorX, (y + 1) * scalingFactorY);
+                vertices[arrayIndexBase + 1].color = getTerrainColor(getElevation(x, y + 1), getMoisture(x, y + 1));
+                vertices[arrayIndexBase + 1].texCoords = computeNormal(x, y + 1, getElevation(x - 1, y + 1), getElevation(x + 1, y + 1), getElevation(x, y + 2), getElevation(x, y));
+            }
+
+            // Bottom right corner (first triangle)
+            vertices[arrayIndexBase + 2].position = sf::Vector2f((x + 1) * scalingFactorX, (y + 1) * scalingFactorY);
+            vertices[arrayIndexBase + 2].color = getTerrainColor(getElevation(x + 1, y + 1), getMoisture(x + 1, y + 1));
+            vertices[arrayIndexBase + 2].texCoords = computeNormal(x + 1, y + 1, getElevation(x, y + 1), getElevation(x + 2, y + 1), getElevation(x + 1, y + 2), getElevation(x + 1, y));
+
+            // Top left corner (second triangle)
+            vertices[arrayIndexBase + 3] = vertices[arrayIndexBase + 0];
+
+            // Bottom right corner (second triangle)
+            vertices[arrayIndexBase + 4] = vertices[arrayIndexBase + 2];
+
+            // Top right corner (second triangle)
+            if (y > rowStart)
+            {
+                vertices[arrayIndexBase + 5] = vertices[arrayIndexBase - resolutionX * 6 + 2];
+            }
+            else
+            {
+                vertices[arrayIndexBase + 5].position = sf::Vector2f((x + 1) * scalingFactorX, y * scalingFactorY);
+                vertices[arrayIndexBase + 5].color = getTerrainColor(getElevation(x + 1, y), getMoisture(x + 1, y));
+                vertices[arrayIndexBase + 5].texCoords = computeNormal(x + 1, y, getElevation(x, y), getElevation(x + 2, y), getElevation(x + 1, y + 1), getElevation(x + 1, y - 1));
+            }
+        }
+    }
+
+    // Copy the resulting geometry from our thread-local buffer into the target buffer
+    std::memcpy(workItem.targetBuffer + (resolutionX * rowStart * 6), &vertices[0], sizeof(sf::Vertex) * resolutionX * rowCount * 6);
+}
+
+
+////////////////////////////////////////////////////////////
+/// Worker thread entry point. We use a thread pool to avoid
+/// the heavy cost of constantly recreating and starting
+/// new threads whenever we need to regenerate the terrain.
+///
+////////////////////////////////////////////////////////////
+void threadFunction()
+{
+    unsigned int rowBlockSize = (resolutionY / blockCount) + 1;
+
+    std::vector<sf::Vertex> vertices(resolutionX * rowBlockSize * 6);
+
+    WorkItem workItem = {0, 0};
+
+    // Loop until the application exits
+    for (;;)
+    {
+        workItem.targetBuffer = 0;
+
+        // Check if there are new work items in the queue
+        {
+            sf::Lock lock(workQueueMutex);
+
+            if (!workPending)
+                return;
+
+            if (!workQueue.empty())
+            {
+                workItem = workQueue.front();
+                workQueue.pop_front();
+            }
+        }
+
+        // If we didn't receive a new work item, keep looping
+        if (!workItem.targetBuffer)
+        {
+            sf::sleep(sf::milliseconds(10));
+
+            continue;
+        }
+
+        processWorkItem(vertices, workItem);
+
+        {
+            sf::Lock lock(workQueueMutex);
+
+            --pendingWorkCount;
+        }
+    }
+}
+
+
+////////////////////////////////////////////////////////////
+/// Terrain generation entry point. This queues up the
+/// generation work items which the worker threads dequeue
+/// and process.
+///
+////////////////////////////////////////////////////////////
+void generateTerrain(sf::Vertex* buffer)
+{
+    bufferUploadPending = true;
+
+    // Make sure the work queue is empty before queuing new work
+    for (;;)
+    {
+        {
+            sf::Lock lock(workQueueMutex);
+
+            if (workQueue.empty())
+                break;
+        }
+
+        sf::sleep(sf::milliseconds(10));
+    }
+
+    // Queue all the new work items
+    {
+        sf::Lock lock(workQueueMutex);
+
+        for (unsigned int i = 0; i < blockCount; i++)
+        {
+            WorkItem workItem = {buffer, i};
+            workQueue.push_back(workItem);
+        }
+
+        pendingWorkCount = blockCount;
+    }
+}
+
+////////////////////////////////////////////////////////////
+// Headers
+////////////////////////////////////////////////////////////
+#include <SFML/Graphics.hpp>
+#include <algorithm>
+#include <sstream>
+#include <iomanip>
+#include <string>
+#include <map>
+
+
+namespace
+{
+    struct JoystickObject
+    {
+        sf::Text label;
+        sf::Text value;
+    };
+
+    typedef std::map<std::string, JoystickObject> Texts;
+    Texts texts;
+    std::ostringstream sstr;
+    float threshold = 0.1f;
+
+    // Axes labels in as C strings
+    const char* axislabels[] = {"X", "Y", "Z", "R", "U", "V", "PovX", "PovY"};
+
+    // Helper to set text entries to a specified value
+    template<typename T>
+    void set(const char* label, const T& value)
+    {
+        sstr.str("");
+        sstr << value;
+        texts[label].value.setString(sstr.str());
+    }
+
+    // Update joystick identification
+    void updateIdentification(unsigned int index)
+    {
+        sstr.str("");
+        sstr << "Joystick " << index << ":";
+        texts["ID"].label.setString(sstr.str());
+        texts["ID"].value.setString(sf::Joystick::getIdentification(index).name);
+    }
+
+    // Update joystick axes
+    void updateAxes(unsigned int index)
+    {
+        for (unsigned int j = 0; j < sf::Joystick::AxisCount; ++j)
+        {
+            if (sf::Joystick::hasAxis(index, static_cast<sf::Joystick::Axis>(j)))
+                set(axislabels[j], sf::Joystick::getAxisPosition(index, static_cast<sf::Joystick::Axis>(j)));
+        }
+    }
+
+    // Update joystick buttons
+    void updateButtons(unsigned int index)
+    {
+        for (unsigned int j = 0; j < sf::Joystick::getButtonCount(index); ++j)
+        {
+            sstr.str("");
+            sstr << "Button " << j;
+
+            set(sstr.str().c_str(), sf::Joystick::isButtonPressed(index, j));
+        }
+    }
+
+    // Helper to update displayed joystick values
+    void updateValues(unsigned int index)
+    {
+        if (sf::Joystick::isConnected(index)) {
+            // Update the label-value sf::Text objects based on the current joystick state
+            updateIdentification(index);
+            updateAxes(index);
+            updateButtons(index);
+        }
+    }
+}
+
+
+////////////////////////////////////////////////////////////
+/// Entry point of application
+///
+/// \return Application exit code
+///
+////////////////////////////////////////////////////////////
+int main()
+{
+    // Create the window of the application
+    sf::RenderWindow window(sf::VideoMode(400, 680), "Joystick", sf::Style::Close);
+    window.setVerticalSyncEnabled(true);
+
+    // Load the text font
+    sf::Font font;
+    if (!font.loadFromFile("resources/sansation.ttf"))
+        return EXIT_FAILURE;
+
+    // Set up our string conversion parameters
+    sstr.precision(2);
+    sstr.setf(std::ios::fixed | std::ios::boolalpha);
+
+    // Set up our joystick identification sf::Text objects
+    texts["ID"].label.setPosition(5.f, 5.f);
+    texts["ID"].value.setPosition(80.f, 5.f);
+
+    texts["ID"].label.setString("<Not Connected>");
+    texts["ID"].value.setString("");
+
+    // Set up our threshold sf::Text objects
+    sstr.str("");
+    sstr << threshold << "  (Change with up/down arrow keys)";
+
+    texts["Threshold"].label.setPosition(5.f, 5.f + 2 * font.getLineSpacing(14));
+    texts["Threshold"].value.setPosition(80.f, 5.f + 2 * font.getLineSpacing(14));
+
+    texts["Threshold"].label.setString("Threshold:");
+    texts["Threshold"].value.setString(sstr.str());
+
+    // Set up our label-value sf::Text objects
+    for (unsigned int i = 0; i < sf::Joystick::AxisCount; ++i)
+    {
+        JoystickObject& object = texts[axislabels[i]];
+
+        object.label.setPosition(5.f, 5.f + ((i + 4) * font.getLineSpacing(14)));
+        object.label.setString(std::string(axislabels[i]) + ":");
+
+        object.value.setPosition(80.f, 5.f + ((i + 4) * font.getLineSpacing(14)));
+        object.value.setString("N/A");
+    }
+
+    for (unsigned int i = 0; i < sf::Joystick::ButtonCount; ++i)
+    {
+        sstr.str("");
+        sstr << "Button " << i;
+        JoystickObject& object = texts[sstr.str()];
+
+        object.label.setPosition(5.f, 5.f + ((sf::Joystick::AxisCount + i + 4) * font.getLineSpacing(14)));
+        object.label.setString(sstr.str() + ":");
+
+        object.value.setPosition(80.f, 5.f + ((sf::Joystick::AxisCount + i + 4) * font.getLineSpacing(14)));
+        object.value.setString("N/A");
+    }
+
+    for (Texts::iterator it = texts.begin(); it != texts.end(); ++it)
+    {
+        it->second.label.setFont(font);
+        it->second.label.setCharacterSize(14);
+        it->second.label.setFillColor(sf::Color::White);
+
+        it->second.value.setFont(font);
+        it->second.value.setCharacterSize(14);
+        it->second.value.setFillColor(sf::Color::White);
+    }
+
+    // Update initially displayed joystick values if a joystick is already connected on startup
+    for (unsigned int i = 0; i < sf::Joystick::Count; ++i)
+    {
+        if (sf::Joystick::isConnected(i))
+        {
+            updateValues(i);
+            break;
+        }
+    }
+
+    while (window.isOpen())
+    {
+        // Handle events
+        sf::Event event;
+        while (window.pollEvent(event))
+        {
+            // Window closed or escape key pressed: exit
+            if ((event.type == sf::Event::Closed) ||
+               ((event.type == sf::Event::KeyPressed) && (event.key.code == sf::Keyboard::Escape)))
+            {
+                window.close();
+                break;
+            }
+            else if ((event.type == sf::Event::JoystickButtonPressed) ||
+                     (event.type == sf::Event::JoystickButtonReleased) ||
+                     (event.type == sf::Event::JoystickMoved) ||
+                     (event.type == sf::Event::JoystickConnected))
+            {
+                // Update displayed joystick values
+                updateValues(event.joystickConnect.joystickId);
+            }
+            else if (event.type == sf::Event::JoystickDisconnected)
+            {
+                // Reset displayed joystick values to empty
+                for (Texts::iterator it = texts.begin(); it != texts.end(); ++it)
+                    it->second.value.setString("N/A");
+
+                texts["ID"].label.setString("<Not Connected>");
+                texts["ID"].value.setString("");
+
+                sstr.str("");
+                sstr << threshold << "  (Change with up/down arrow keys)";
+
+                texts["Threshold"].value.setString(sstr.str());
+            }
+        }
+
+        // Update threshold if the user wants to change it
+        float newThreshold = threshold;
+
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::Up))
+            newThreshold += 0.1f;
+
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::Down))
+            newThreshold -= 0.1f;
+
+        newThreshold = std::min(std::max(newThreshold, 0.1f), 100.0f);
+
+        if (newThreshold != threshold)
+        {
+            threshold = newThreshold;
+            window.setJoystickThreshold(threshold);
+
+            sstr.str("");
+            sstr << threshold << "  (Change with up/down arrow keys)";
+
+            texts["Threshold"].value.setString(sstr.str());
+        }
+
+        // Clear the window
+        window.clear();
+
+        // Draw the label-value sf::Text objects
+        for (Texts::const_iterator it = texts.begin(); it != texts.end(); ++it)
+        {
+            window.draw(it->second.label);
+            window.draw(it->second.value);
+        }
+
+        // Display things on screen
+        window.display();
+    }
+}
+
+////////////////////////////////////////////////////////////
+// Headers
+////////////////////////////////////////////////////////////
+#include <SFML/Graphics.hpp>
+#include <SFML/OpenGL.hpp>
+
+#ifndef GL_SRGB8_ALPHA8
+#define GL_SRGB8_ALPHA8 0x8C43
+#endif
+
+
+////////////////////////////////////////////////////////////
+/// Entry point of application
+///
+/// \return Application exit code
+///
+////////////////////////////////////////////////////////////
+int main()
+{
+    bool exit = false;
+    bool sRgb = false;
+
+    while (!exit)
+    {
+        // Request a 24-bits depth buffer when creating the window
+        sf::ContextSettings contextSettings;
+        contextSettings.depthBits = 24;
+        contextSettings.sRgbCapable = sRgb;
+
+        // Create the main window
+        sf::RenderWindow window(sf::VideoMode(800, 600), "SFML graphics with OpenGL", sf::Style::Default, contextSettings);
+        window.setVerticalSyncEnabled(true);
+
+        // Create a sprite for the background
+        sf::Texture backgroundTexture;
+        backgroundTexture.setSrgb(sRgb);
+        if (!backgroundTexture.loadFromFile("resources/background.jpg"))
+            return EXIT_FAILURE;
+        sf::Sprite background(backgroundTexture);
+
+        // Create some text to draw on top of our OpenGL object
+        sf::Font font;
+        if (!font.loadFromFile("resources/sansation.ttf"))
+            return EXIT_FAILURE;
+        sf::Text text("SFML / OpenGL demo", font);
+        sf::Text sRgbInstructions("Press space to toggle sRGB conversion", font);
+        sf::Text mipmapInstructions("Press return to toggle mipmapping", font);
+        text.setFillColor(sf::Color(255, 255, 255, 170));
+        sRgbInstructions.setFillColor(sf::Color(255, 255, 255, 170));
+        mipmapInstructions.setFillColor(sf::Color(255, 255, 255, 170));
+        text.setPosition(250.f, 450.f);
+        sRgbInstructions.setPosition(150.f, 500.f);
+        mipmapInstructions.setPosition(180.f, 550.f);
+
+        // Load a texture to apply to our 3D cube
+        sf::Texture texture;
+        if (!texture.loadFromFile("resources/texture.jpg"))
+            return EXIT_FAILURE;
+
+        // Attempt to generate a mipmap for our cube texture
+        // We don't check the return value here since
+        // mipmapping is purely optional in this example
+        texture.generateMipmap();
+
+        // Make the window the active window for OpenGL calls
+        window.setActive(true);
+
+        // Enable Z-buffer read and write
+        glEnable(GL_DEPTH_TEST);
+        glDepthMask(GL_TRUE);
+        glClearDepth(1.f);
+
+        // Disable lighting
+        glDisable(GL_LIGHTING);
+
+        // Configure the viewport (the same size as the window)
+        glViewport(0, 0, window.getSize().x, window.getSize().y);
+
+        // Setup a perspective projection
+        glMatrixMode(GL_PROJECTION);
+        glLoadIdentity();
+        GLfloat ratio = static_cast<float>(window.getSize().x) / window.getSize().y;
+        glFrustum(-ratio, ratio, -1.f, 1.f, 1.f, 500.f);
+
+        // Bind the texture
+        glEnable(GL_TEXTURE_2D);
+        sf::Texture::bind(&texture);
+
+        // Define a 3D cube (6 faces made of 2 triangles composed by 3 vertices)
+        static const GLfloat cube[] =
+        {
+            // positions    // texture coordinates
+            -20, -20, -20,  0, 0,
+            -20,  20, -20,  1, 0,
+            -20, -20,  20,  0, 1,
+            -20, -20,  20,  0, 1,
+            -20,  20, -20,  1, 0,
+            -20,  20,  20,  1, 1,
+
+             20, -20, -20,  0, 0,
+             20,  20, -20,  1, 0,
+             20, -20,  20,  0, 1,
+             20, -20,  20,  0, 1,
+             20,  20, -20,  1, 0,
+             20,  20,  20,  1, 1,
+
+            -20, -20, -20,  0, 0,
+             20, -20, -20,  1, 0,
+            -20, -20,  20,  0, 1,
+            -20, -20,  20,  0, 1,
+             20, -20, -20,  1, 0,
+             20, -20,  20,  1, 1,
+
+            -20,  20, -20,  0, 0,
+             20,  20, -20,  1, 0,
+            -20,  20,  20,  0, 1,
+            -20,  20,  20,  0, 1,
+             20,  20, -20,  1, 0,
+             20,  20,  20,  1, 1,
+
+            -20, -20, -20,  0, 0,
+             20, -20, -20,  1, 0,
+            -20,  20, -20,  0, 1,
+            -20,  20, -20,  0, 1,
+             20, -20, -20,  1, 0,
+             20,  20, -20,  1, 1,
+
+            -20, -20,  20,  0, 0,
+             20, -20,  20,  1, 0,
+            -20,  20,  20,  0, 1,
+            -20,  20,  20,  0, 1,
+             20, -20,  20,  1, 0,
+             20,  20,  20,  1, 1
+        };
+
+        // Enable position and texture coordinates vertex components
+        glEnableClientState(GL_VERTEX_ARRAY);
+        glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+        glVertexPointer(3, GL_FLOAT, 5 * sizeof(GLfloat), cube);
+        glTexCoordPointer(2, GL_FLOAT, 5 * sizeof(GLfloat), cube + 3);
+
+        // Disable normal and color vertex components
+        glDisableClientState(GL_NORMAL_ARRAY);
+        glDisableClientState(GL_COLOR_ARRAY);
+
+        // Make the window no longer the active window for OpenGL calls
+        window.setActive(false);
+
+        // Create a clock for measuring the time elapsed
+        sf::Clock clock;
+
+        // Flag to track whether mipmapping is currently enabled
+        bool mipmapEnabled = true;
+
+        // Start game loop
+        while (window.isOpen())
+        {
+            // Process events
+            sf::Event event;
+            while (window.pollEvent(event))
+            {
+                // Close window: exit
+                if (event.type == sf::Event::Closed)
+                {
+                    exit = true;
+                    window.close();
+                }
+
+                // Escape key: exit
+                if ((event.type == sf::Event::KeyPressed) && (event.key.code == sf::Keyboard::Escape))
+                {
+                    exit = true;
+                    window.close();
+                }
+
+                // Return key: toggle mipmapping
+                if ((event.type == sf::Event::KeyPressed) && (event.key.code == sf::Keyboard::Enter))
+                {
+                    if (mipmapEnabled)
+                    {
+                        // We simply reload the texture to disable mipmapping
+                        if (!texture.loadFromFile("resources/texture.jpg"))
+                            return EXIT_FAILURE;
+
+                        mipmapEnabled = false;
+                    }
+                    else
+                    {
+                        texture.generateMipmap();
+
+                        mipmapEnabled = true;
+                    }
+                }
+
+                // Space key: toggle sRGB conversion
+                if ((event.type == sf::Event::KeyPressed) && (event.key.code == sf::Keyboard::Space))
+                {
+                    sRgb = !sRgb;
+                    window.close();
+                }
+
+                // Adjust the viewport when the window is resized
+                if (event.type == sf::Event::Resized)
+                {
+                    // Make the window the active window for OpenGL calls
+                    window.setActive(true);
+
+                    glViewport(0, 0, event.size.width, event.size.height);
+
+                    // Make the window no longer the active window for OpenGL calls
+                    window.setActive(false);
+                }
+            }
+
+            // Draw the background
+            window.pushGLStates();
+            window.draw(background);
+            window.popGLStates();
+
+            // Make the window the active window for OpenGL calls
+            window.setActive(true);
+
+            // Clear the depth buffer
+            glClear(GL_DEPTH_BUFFER_BIT);
+
+            // We get the position of the mouse cursor, so that we can move the box accordingly
+            float x =  sf::Mouse::getPosition(window).x * 200.f / window.getSize().x - 100.f;
+            float y = -sf::Mouse::getPosition(window).y * 200.f / window.getSize().y + 100.f;
+
+            // Apply some transformations
+            glMatrixMode(GL_MODELVIEW);
+            glLoadIdentity();
+            glTranslatef(x, y, -100.f);
+            glRotatef(clock.getElapsedTime().asSeconds() * 50.f, 1.f, 0.f, 0.f);
+            glRotatef(clock.getElapsedTime().asSeconds() * 30.f, 0.f, 1.f, 0.f);
+            glRotatef(clock.getElapsedTime().asSeconds() * 90.f, 0.f, 0.f, 1.f);
+
+            // Draw the cube
+            glDrawArrays(GL_TRIANGLES, 0, 36);
+
+            // Make the window no longer the active window for OpenGL calls
+            window.setActive(false);
+
+            // Draw some text on top of our OpenGL object
+            window.pushGLStates();
+            window.draw(text);
+            window.draw(sRgbInstructions);
+            window.draw(mipmapInstructions);
+            window.popGLStates();
+
+            // Finally, display the rendered frame on screen
+            window.display();
+        }
+    }
+
+    return EXIT_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////
+// Headers
+////////////////////////////////////////////////////////////
+#include <SFML/Graphics.hpp>
+#include <SFML/Audio.hpp>
+#include <cmath>
+#include <ctime>
+#include <cstdlib>
+
+
+////////////////////////////////////////////////////////////
+/// Entry point of application
+///
+/// \return Application exit code
+///
+////////////////////////////////////////////////////////////
+int main()
+{
+    std::srand(static_cast<unsigned int>(std::time(NULL)));
+
+    // Define some constants
+    const float pi = 3.14159f;
+    const int gameWidth = 800;
+    const int gameHeight = 600;
+    sf::Vector2f paddleSize(25, 100);
+    float ballRadius = 10.f;
+
+    // Create the window of the application
+    sf::RenderWindow window(sf::VideoMode(gameWidth, gameHeight, 32), "SFML Pong",
+                            sf::Style::Titlebar | sf::Style::Close);
+    window.setVerticalSyncEnabled(true);
+
+    // Load the sounds used in the game
+    sf::SoundBuffer ballSoundBuffer;
+    if (!ballSoundBuffer.loadFromFile("resources/ball.wav"))
+        return EXIT_FAILURE;
+    sf::Sound ballSound(ballSoundBuffer);
+
+    // Create the left paddle
+    sf::RectangleShape leftPaddle;
+    leftPaddle.setSize(paddleSize - sf::Vector2f(3, 3));
+    leftPaddle.setOutlineThickness(3);
+    leftPaddle.setOutlineColor(sf::Color::Black);
+    leftPaddle.setFillColor(sf::Color(100, 100, 200));
+    leftPaddle.setOrigin(paddleSize / 2.f);
+
+    // Create the right paddle
+    sf::RectangleShape rightPaddle;
+    rightPaddle.setSize(paddleSize - sf::Vector2f(3, 3));
+    rightPaddle.setOutlineThickness(3);
+    rightPaddle.setOutlineColor(sf::Color::Black);
+    rightPaddle.setFillColor(sf::Color(200, 100, 100));
+    rightPaddle.setOrigin(paddleSize / 2.f);
+
+    // Create the ball
+    sf::CircleShape ball;
+    ball.setRadius(ballRadius - 3);
+    ball.setOutlineThickness(3);
+    ball.setOutlineColor(sf::Color::Black);
+    ball.setFillColor(sf::Color::White);
+    ball.setOrigin(ballRadius / 2, ballRadius / 2);
+
+    // Load the text font
+    sf::Font font;
+    if (!font.loadFromFile("resources/sansation.ttf"))
+        return EXIT_FAILURE;
+
+    // Initialize the pause message
+    sf::Text pauseMessage;
+    pauseMessage.setFont(font);
+    pauseMessage.setCharacterSize(40);
+    pauseMessage.setPosition(170.f, 150.f);
+    pauseMessage.setFillColor(sf::Color::White);
+    pauseMessage.setString("Welcome to SFML pong!\nPress space to start the game");
+
+    // Define the paddles properties
+    sf::Clock AITimer;
+    const sf::Time AITime   = sf::seconds(0.1f);
+    const float paddleSpeed = 400.f;
+    float rightPaddleSpeed  = 0.f;
+    const float ballSpeed   = 400.f;
+    float ballAngle         = 0.f; // to be changed later
+
+    sf::Clock clock;
+    bool isPlaying = false;
+    while (window.isOpen())
+    {
+        // Handle events
+        sf::Event event;
+        while (window.pollEvent(event))
+        {
+            // Window closed or escape key pressed: exit
+            if ((event.type == sf::Event::Closed) ||
+               ((event.type == sf::Event::KeyPressed) && (event.key.code == sf::Keyboard::Escape)))
+            {
+                window.close();
+                break;
+            }
+
+            // Space key pressed: play
+            if ((event.type == sf::Event::KeyPressed) && (event.key.code == sf::Keyboard::Space))
+            {
+                if (!isPlaying)
+                {
+                    // (re)start the game
+                    isPlaying = true;
+                    clock.restart();
+
+                    // Reset the position of the paddles and ball
+                    leftPaddle.setPosition(10 + paddleSize.x / 2, gameHeight / 2);
+                    rightPaddle.setPosition(gameWidth - 10 - paddleSize.x / 2, gameHeight / 2);
+                    ball.setPosition(gameWidth / 2, gameHeight / 2);
+
+                    // Reset the ball angle
+                    do
+                    {
+                        // Make sure the ball initial angle is not too much vertical
+                        ballAngle = (std::rand() % 360) * 2 * pi / 360;
+                    }
+                    while (std::abs(std::cos(ballAngle)) < 0.7f);
+                }
+            }
+        }
+
+        if (isPlaying)
+        {
+            float deltaTime = clock.restart().asSeconds();
+
+            // Move the player's paddle
+            if (sf::Keyboard::isKeyPressed(sf::Keyboard::Up) &&
+               (leftPaddle.getPosition().y - paddleSize.y / 2 > 5.f))
+            {
+                leftPaddle.move(0.f, -paddleSpeed * deltaTime);
+            }
+            if (sf::Keyboard::isKeyPressed(sf::Keyboard::Down) &&
+               (leftPaddle.getPosition().y + paddleSize.y / 2 < gameHeight - 5.f))
+            {
+                leftPaddle.move(0.f, paddleSpeed * deltaTime);
+            }
+
+            // Move the computer's paddle
+            if (((rightPaddleSpeed < 0.f) && (rightPaddle.getPosition().y - paddleSize.y / 2 > 5.f)) ||
+                ((rightPaddleSpeed > 0.f) && (rightPaddle.getPosition().y + paddleSize.y / 2 < gameHeight - 5.f)))
+            {
+                rightPaddle.move(0.f, rightPaddleSpeed * deltaTime);
+            }
+
+            // Update the computer's paddle direction according to the ball position
+            if (AITimer.getElapsedTime() > AITime)
+            {
+                AITimer.restart();
+                if (ball.getPosition().y + ballRadius > rightPaddle.getPosition().y + paddleSize.y / 2)
+                    rightPaddleSpeed = paddleSpeed;
+                else if (ball.getPosition().y - ballRadius < rightPaddle.getPosition().y - paddleSize.y / 2)
+                    rightPaddleSpeed = -paddleSpeed;
+                else
+                    rightPaddleSpeed = 0.f;
+            }
+
+            // Move the ball
+            float factor = ballSpeed * deltaTime;
+            ball.move(std::cos(ballAngle) * factor, std::sin(ballAngle) * factor);
+
+            // Check collisions between the ball and the screen
+            if (ball.getPosition().x - ballRadius < 0.f)
+            {
+                isPlaying = false;
+                pauseMessage.setString("You lost!\nPress space to restart or\nescape to exit");
+            }
+            if (ball.getPosition().x + ballRadius > gameWidth)
+            {
+                isPlaying = false;
+                pauseMessage.setString("You won!\nPress space to restart or\nescape to exit");
+            }
+            if (ball.getPosition().y - ballRadius < 0.f)
+            {
+                ballSound.play();
+                ballAngle = -ballAngle;
+                ball.setPosition(ball.getPosition().x, ballRadius + 0.1f);
+            }
+            if (ball.getPosition().y + ballRadius > gameHeight)
+            {
+                ballSound.play();
+                ballAngle = -ballAngle;
+                ball.setPosition(ball.getPosition().x, gameHeight - ballRadius - 0.1f);
+            }
+
+            // Check the collisions between the ball and the paddles
+            // Left Paddle
+            if (ball.getPosition().x - ballRadius < leftPaddle.getPosition().x + paddleSize.x / 2 &&
+                ball.getPosition().x - ballRadius > leftPaddle.getPosition().x &&
+                ball.getPosition().y + ballRadius >= leftPaddle.getPosition().y - paddleSize.y / 2 &&
+                ball.getPosition().y - ballRadius <= leftPaddle.getPosition().y + paddleSize.y / 2)
+            {
+                if (ball.getPosition().y > leftPaddle.getPosition().y)
+                    ballAngle = pi - ballAngle + (std::rand() % 20) * pi / 180;
+                else
+                    ballAngle = pi - ballAngle - (std::rand() % 20) * pi / 180;
+
+                ballSound.play();
+                ball.setPosition(leftPaddle.getPosition().x + ballRadius + paddleSize.x / 2 + 0.1f, ball.getPosition().y);
+            }
+
+            // Right Paddle
+            if (ball.getPosition().x + ballRadius > rightPaddle.getPosition().x - paddleSize.x / 2 &&
+                ball.getPosition().x + ballRadius < rightPaddle.getPosition().x &&
+                ball.getPosition().y + ballRadius >= rightPaddle.getPosition().y - paddleSize.y / 2 &&
+                ball.getPosition().y - ballRadius <= rightPaddle.getPosition().y + paddleSize.y / 2)
+            {
+                if (ball.getPosition().y > rightPaddle.getPosition().y)
+                    ballAngle = pi - ballAngle + (std::rand() % 20) * pi / 180;
+                else
+                    ballAngle = pi - ballAngle - (std::rand() % 20) * pi / 180;
+
+                ballSound.play();
+                ball.setPosition(rightPaddle.getPosition().x - ballRadius - paddleSize.x / 2 - 0.1f, ball.getPosition().y);
+            }
+        }
+
+        // Clear the window
+        window.clear(sf::Color(50, 200, 50));
+
+        if (isPlaying)
+        {
+            // Draw the paddles and the ball
+            window.draw(leftPaddle);
+            window.draw(rightPaddle);
+            window.draw(ball);
+        }
+        else
+        {
+            // Draw the pause message
+            window.draw(pauseMessage);
+        }
+
+        // Display things on screen
+        window.display();
+    }
+
+    return EXIT_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////
+// Headers
+////////////////////////////////////////////////////////////
+#include "Effect.hpp"
+#include <vector>
+#include <cmath>
+
+
+const sf::Font* Effect::s_font = NULL;
+
+////////////////////////////////////////////////////////////
+// "Pixelate" fragment shader
+////////////////////////////////////////////////////////////
+class Pixelate : public Effect
+{
+public:
+
+    Pixelate() :
+    Effect("pixelate")
+    {
+    }
+
+    bool onLoad()
+    {
+        // Load the texture and initialize the sprite
+        if (!m_texture.loadFromFile("resources/background.jpg"))
+            return false;
+        m_sprite.setTexture(m_texture);
+
+        // Load the shader
+        if (!m_shader.loadFromFile("resources/pixelate.frag", sf::Shader::Fragment))
+            return false;
+        m_shader.setUniform("texture", sf::Shader::CurrentTexture);
+
+        return true;
+    }
+
+    void onUpdate(float, float x, float y)
+    {
+        m_shader.setUniform("pixel_threshold", (x + y) / 30);
+    }
+
+    void onDraw(sf::RenderTarget& target, sf::RenderStates states) const
+    {
+        states.shader = &m_shader;
+        target.draw(m_sprite, states);
+    }
+
+private:
+
+    sf::Texture m_texture;
+    sf::Sprite m_sprite;
+    sf::Shader m_shader;
+};
+
+
+////////////////////////////////////////////////////////////
+// "Wave" vertex shader + "blur" fragment shader
+////////////////////////////////////////////////////////////
+class WaveBlur : public Effect
+{
+public:
+
+    WaveBlur() :
+    Effect("wave + blur")
+    {
+    }
+
+    bool onLoad()
+    {
+        // Create the text
+        m_text.setString("Praesent suscipit augue in velit pulvinar hendrerit varius purus aliquam.\n"
+                         "Mauris mi odio, bibendum quis fringilla a, laoreet vel orci. Proin vitae vulputate tortor.\n"
+                         "Praesent cursus ultrices justo, ut feugiat ante vehicula quis.\n"
+                         "Donec fringilla scelerisque mauris et viverra.\n"
+                         "Maecenas adipiscing ornare scelerisque. Nullam at libero elit.\n"
+                         "Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas.\n"
+                         "Nullam leo urna, tincidunt id semper eget, ultricies sed mi.\n"
+                         "Morbi mauris massa, commodo id dignissim vel, lobortis et elit.\n"
+                         "Fusce vel libero sed neque scelerisque venenatis.\n"
+                         "Integer mattis tincidunt quam vitae iaculis.\n"
+                         "Vivamus fringilla sem non velit venenatis fermentum.\n"
+                         "Vivamus varius tincidunt nisi id vehicula.\n"
+                         "Integer ullamcorper, enim vitae euismod rutrum, massa nisl semper ipsum,\n"
+                         "vestibulum sodales sem ante in massa.\n"
+                         "Vestibulum in augue non felis convallis viverra.\n"
+                         "Mauris ultricies dolor sed massa convallis sed aliquet augue fringilla.\n"
+                         "Duis erat eros, porta in accumsan in, blandit quis sem.\n"
+                         "In hac habitasse platea dictumst. Etiam fringilla est id odio dapibus sit amet semper dui laoreet.\n");
+        m_text.setFont(getFont());
+        m_text.setCharacterSize(22);
+        m_text.setPosition(30, 20);
+
+        // Load the shader
+        if (!m_shader.loadFromFile("resources/wave.vert", "resources/blur.frag"))
+            return false;
+
+        return true;
+    }
+
+    void onUpdate(float time, float x, float y)
+    {
+        m_shader.setUniform("wave_phase", time);
+        m_shader.setUniform("wave_amplitude", sf::Vector2f(x * 40, y * 40));
+        m_shader.setUniform("blur_radius", (x + y) * 0.008f);
+    }
+
+    void onDraw(sf::RenderTarget& target, sf::RenderStates states) const
+    {
+        states.shader = &m_shader;
+        target.draw(m_text, states);
+    }
+
+private:
+
+    sf::Text m_text;
+    sf::Shader m_shader;
+};
+
+
+////////////////////////////////////////////////////////////
+// "Storm" vertex shader + "blink" fragment shader
+////////////////////////////////////////////////////////////
+class StormBlink : public Effect
+{
+public:
+
+    StormBlink() :
+    Effect("storm + blink")
+    {
+    }
+
+    bool onLoad()
+    {
+        // Create the points
+        m_points.setPrimitiveType(sf::Points);
+        for (int i = 0; i < 40000; ++i)
+        {
+            float x = static_cast<float>(std::rand() % 800);
+            float y = static_cast<float>(std::rand() % 600);
+            sf::Uint8 r = std::rand() % 255;
+            sf::Uint8 g = std::rand() % 255;
+            sf::Uint8 b = std::rand() % 255;
+            m_points.append(sf::Vertex(sf::Vector2f(x, y), sf::Color(r, g, b)));
+        }
+
+        // Load the shader
+        if (!m_shader.loadFromFile("resources/storm.vert", "resources/blink.frag"))
+            return false;
+
+        return true;
+    }
+
+    void onUpdate(float time, float x, float y)
+    {
+        float radius = 200 + std::cos(time) * 150;
+        m_shader.setUniform("storm_position", sf::Vector2f(x * 800, y * 600));
+        m_shader.setUniform("storm_inner_radius", radius / 3);
+        m_shader.setUniform("storm_total_radius", radius);
+        m_shader.setUniform("blink_alpha", 0.5f + std::cos(time * 3) * 0.25f);
+    }
+
+    void onDraw(sf::RenderTarget& target, sf::RenderStates states) const
+    {
+        states.shader = &m_shader;
+        target.draw(m_points, states);
+    }
+
+private:
+
+    sf::VertexArray m_points;
+    sf::Shader m_shader;
+};
+
+
+////////////////////////////////////////////////////////////
+// "Edge" post-effect fragment shader
+////////////////////////////////////////////////////////////
+class Edge : public Effect
+{
+public:
+
+    Edge() :
+    Effect("edge post-effect")
+    {
+    }
+
+    bool onLoad()
+    {
+        // Create the off-screen surface
+        if (!m_surface.create(800, 600))
+            return false;
+        m_surface.setSmooth(true);
+
+        // Load the textures
+        if (!m_backgroundTexture.loadFromFile("resources/sfml.png"))
+            return false;
+        m_backgroundTexture.setSmooth(true);
+        if (!m_entityTexture.loadFromFile("resources/devices.png"))
+            return false;
+        m_entityTexture.setSmooth(true);
+
+        // Initialize the background sprite
+        m_backgroundSprite.setTexture(m_backgroundTexture);
+        m_backgroundSprite.setPosition(135, 100);
+
+        // Load the moving entities
+        for (int i = 0; i < 6; ++i)
+        {
+            sf::Sprite entity(m_entityTexture, sf::IntRect(96 * i, 0, 96, 96));
+            m_entities.push_back(entity);
+        }
+
+        // Load the shader
+        if (!m_shader.loadFromFile("resources/edge.frag", sf::Shader::Fragment))
+            return false;
+        m_shader.setUniform("texture", sf::Shader::CurrentTexture);
+
+        return true;
+    }
+
+    void onUpdate(float time, float x, float y)
+    {
+        m_shader.setUniform("edge_threshold", 1 - (x + y) / 2);
+
+        // Update the position of the moving entities
+        for (std::size_t i = 0; i < m_entities.size(); ++i)
+        {
+            sf::Vector2f position;
+            position.x = std::cos(0.25f * (time * i + (m_entities.size() - i))) * 300 + 350;
+            position.y = std::sin(0.25f * (time * (m_entities.size() - i) + i)) * 200 + 250;
+            m_entities[i].setPosition(position);
+        }
+
+        // Render the updated scene to the off-screen surface
+        m_surface.clear(sf::Color::White);
+        m_surface.draw(m_backgroundSprite);
+        for (std::size_t i = 0; i < m_entities.size(); ++i)
+            m_surface.draw(m_entities[i]);
+        m_surface.display();
+    }
+
+    void onDraw(sf::RenderTarget& target, sf::RenderStates states) const
+    {
+        states.shader = &m_shader;
+        target.draw(sf::Sprite(m_surface.getTexture()), states);
+    }
+
+private:
+
+    sf::RenderTexture m_surface;
+    sf::Texture m_backgroundTexture;
+    sf::Texture m_entityTexture;
+    sf::Sprite m_backgroundSprite;
+    std::vector<sf::Sprite> m_entities;
+    sf::Shader m_shader;
+};
+
+
+////////////////////////////////////////////////////////////
+// "Geometry" geometry shader example
+////////////////////////////////////////////////////////////
+class Geometry : public Effect
+{
+public:
+
+    Geometry() :
+        Effect("geometry shader billboards"),
+        m_pointCloud(sf::Points, 10000)
+    {
+    }
+
+    bool onLoad()
+    {
+        // Check if geometry shaders are supported
+        if (!sf::Shader::isGeometryAvailable())
+            return false;
+
+        // Move the points in the point cloud to random positions
+        for (std::size_t i = 0; i < 10000; i++)
+        {
+            // Spread the coordinates from -480 to +480
+            // So they'll always fill the viewport at 800x600
+            m_pointCloud[i].position.x = rand() % 960 - 480.f;
+            m_pointCloud[i].position.y = rand() % 960 - 480.f;
+        }
+
+        // Load the texture
+        if (!m_logoTexture.loadFromFile("resources/logo.png"))
+            return false;
+
+        // Load the shader
+        if (!m_shader.loadFromFile("resources/billboard.vert", "resources/billboard.geom", "resources/billboard.frag"))
+            return false;
+        m_shader.setUniform("texture", sf::Shader::CurrentTexture);
+
+        // Set the render resolution (used for proper scaling)
+        m_shader.setUniform("resolution", sf::Vector2f(800, 600));
+
+        return true;
+    }
+
+    void onUpdate(float time, float x, float y)
+    {
+        // Reset our transformation matrix
+        m_transform = sf::Transform::Identity;
+        // Move to the center of the window
+        m_transform.translate(400, 300);
+        // Rotate everything based on cursor position
+        m_transform.rotate(x * 360.f);
+
+        // Adjust billboard size to scale between 25 and 75
+        float size = 25 + std::abs(y) * 50;
+
+        // Update the shader parameter
+        m_shader.setUniform("size", sf::Vector2f(size, size));
+    }
+
+    void onDraw(sf::RenderTarget& target, sf::RenderStates states) const
+    {
+        // Prepare the render state
+        states.shader = &m_shader;
+        states.texture = &m_logoTexture;
+        states.transform = m_transform;
+
+        // Draw the point cloud
+        target.draw(m_pointCloud, states);
+    }
+
+private:
+
+    sf::Texture m_logoTexture;
+    sf::Transform m_transform;
+    sf::Shader m_shader;
+    sf::VertexArray m_pointCloud;
+};
+
+
+////////////////////////////////////////////////////////////
+/// Entry point of application
+///
+/// \return Application exit code
+///
+////////////////////////////////////////////////////////////
+int main()
+{
+    // Create the main window
+    sf::RenderWindow window(sf::VideoMode(800, 600), "SFML Shader",
+                            sf::Style::Titlebar | sf::Style::Close);
+    window.setVerticalSyncEnabled(true);
+
+    // Load the application font and pass it to the Effect class
+    sf::Font font;
+    if (!font.loadFromFile("resources/sansation.ttf"))
+        return EXIT_FAILURE;
+    Effect::setFont(font);
+
+    // Create the effects
+    std::vector<Effect*> effects;
+    effects.push_back(new Pixelate);
+    effects.push_back(new WaveBlur);
+    effects.push_back(new StormBlink);
+    effects.push_back(new Edge);
+    effects.push_back(new Geometry);
+    std::size_t current = 0;
+
+    // Initialize them
+    for (std::size_t i = 0; i < effects.size(); ++i)
+        effects[i]->load();
+
+    // Create the messages background
+    sf::Texture textBackgroundTexture;
+    if (!textBackgroundTexture.loadFromFile("resources/text-background.png"))
+        return EXIT_FAILURE;
+    sf::Sprite textBackground(textBackgroundTexture);
+    textBackground.setPosition(0, 520);
+    textBackground.setColor(sf::Color(255, 255, 255, 200));
+
+    // Create the description text
+    sf::Text description("Current effect: " + effects[current]->getName(), font, 20);
+    description.setPosition(10, 530);
+    description.setFillColor(sf::Color(80, 80, 80));
+
+    // Create the instructions text
+    sf::Text instructions("Press left and right arrows to change the current shader", font, 20);
+    instructions.setPosition(280, 555);
+    instructions.setFillColor(sf::Color(80, 80, 80));
+
+    // Start the game loop
+    sf::Clock clock;
+    while (window.isOpen())
+    {
+        // Process events
+        sf::Event event;
+        while (window.pollEvent(event))
+        {
+            // Close window: exit
+            if (event.type == sf::Event::Closed)
+                window.close();
+
+            if (event.type == sf::Event::KeyPressed)
+            {
+                switch (event.key.code)
+                {
+                    // Escape key: exit
+                    case sf::Keyboard::Escape:
+                        window.close();
+                        break;
+
+                    // Left arrow key: previous shader
+                    case sf::Keyboard::Left:
+                        if (current == 0)
+                            current = effects.size() - 1;
+                        else
+                            current--;
+                        description.setString("Current effect: " + effects[current]->getName());
+                        break;
+
+                    // Right arrow key: next shader
+                    case sf::Keyboard::Right:
+                        if (current == effects.size() - 1)
+                            current = 0;
+                        else
+                            current++;
+                        description.setString("Current effect: " + effects[current]->getName());
+                        break;
+
+                    default:
+                        break;
+                }
+            }
+        }
+
+        // Update the current example
+        float x = static_cast<float>(sf::Mouse::getPosition(window).x) / window.getSize().x;
+        float y = static_cast<float>(sf::Mouse::getPosition(window).y) / window.getSize().y;
+        effects[current]->update(clock.getElapsedTime().asSeconds(), x, y);
+
+        // Clear the window
+        window.clear(sf::Color(255, 128, 0));
+
+        // Draw the current example
+        window.draw(*effects[current]);
+
+        // Draw the text
+        window.draw(textBackground);
+        window.draw(instructions);
+        window.draw(description);
+
+        // Finally, display the rendered frame on screen
+        window.display();
+    }
+
+    // delete the effects
+    for (std::size_t i = 0; i < effects.size(); ++i)
+        delete effects[i];
+
+    return EXIT_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////
+// Headers
+////////////////////////////////////////////////////////////
+#include <iostream>
+#include <cstdlib>
+
+
+void runTcpServer(unsigned short port);
+void runTcpClient(unsigned short port);
+void runUdpServer(unsigned short port);
+void runUdpClient(unsigned short port);
+
+
+////////////////////////////////////////////////////////////
+/// Entry point of application
+///
+/// \return Application exit code
+///
+////////////////////////////////////////////////////////////
+int main()
+{
+    // Choose an arbitrary port for opening sockets
+    const unsigned short port = 50001;
+
+    // TCP, UDP or connected UDP ?
+    char protocol;
+    std::cout << "Do you want to use TCP (t) or UDP (u)? ";
+    std::cin  >> protocol;
+
+    // Client or server ?
+    char who;
+    std::cout << "Do you want to be a server (s) or a client (c)? ";
+    std::cin  >> who;
+
+    if (protocol == 't')
+    {
+        // Test the TCP protocol
+        if (who == 's')
+            runTcpServer(port);
+        else
+            runTcpClient(port);
+    }
+    else
+    {
+        // Test the unconnected UDP protocol
+        if (who == 's')
+            runUdpServer(port);
+        else
+            runUdpClient(port);
+    }
+
+    // Wait until the user presses 'enter' key
+    std::cout << "Press enter to exit..." << std::endl;
+    std::cin.ignore(10000, '\n');
+    std::cin.ignore(10000, '\n');
+
+    return EXIT_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////
+// Headers
+////////////////////////////////////////////////////////////
+#include <SFML/Network.hpp>
+#include <iostream>
+
+
+////////////////////////////////////////////////////////////
+/// Launch a server, wait for an incoming connection,
+/// send a message and wait for the answer.
+///
+////////////////////////////////////////////////////////////
+void runTcpServer(unsigned short port)
+{
+    // Create a server socket to accept new connections
+    sf::TcpListener listener;
+
+    // Listen to the given port for incoming connections
+    if (listener.listen(port) != sf::Socket::Done)
+        return;
+    std::cout << "Server is listening to port " << port << ", waiting for connections... " << std::endl;
+
+    // Wait for a connection
+    sf::TcpSocket socket;
+    if (listener.accept(socket) != sf::Socket::Done)
+        return;
+    std::cout << "Client connected: " << socket.getRemoteAddress() << std::endl;
+
+    // Send a message to the connected client
+    const char out[] = "Hi, I'm the server";
+    if (socket.send(out, sizeof(out)) != sf::Socket::Done)
+        return;
+    std::cout << "Message sent to the client: \"" << out << "\"" << std::endl;
+
+    // Receive a message back from the client
+    char in[128];
+    std::size_t received;
+    if (socket.receive(in, sizeof(in), received) != sf::Socket::Done)
+        return;
+    std::cout << "Answer received from the client: \"" << in << "\"" << std::endl;
+}
+
+
+////////////////////////////////////////////////////////////
+/// Create a client, connect it to a server, display the
+/// welcome message and send an answer.
+///
+////////////////////////////////////////////////////////////
+void runTcpClient(unsigned short port)
+{
+    // Ask for the server address
+    sf::IpAddress server;
+    do
+    {
+        std::cout << "Type the address or name of the server to connect to: ";
+        std::cin  >> server;
+    }
+    while (server == sf::IpAddress::None);
+
+    // Create a socket for communicating with the server
+    sf::TcpSocket socket;
+
+    // Connect to the server
+    if (socket.connect(server, port) != sf::Socket::Done)
+        return;
+    std::cout << "Connected to server " << server << std::endl;
+
+    // Receive a message from the server
+    char in[128];
+    std::size_t received;
+    if (socket.receive(in, sizeof(in), received) != sf::Socket::Done)
+        return;
+    std::cout << "Message received from the server: \"" << in << "\"" << std::endl;
+
+    // Send an answer to the server
+    const char out[] = "Hi, I'm a client";
+    if (socket.send(out, sizeof(out)) != sf::Socket::Done)
+        return;
+    std::cout << "Message sent to the server: \"" << out << "\"" << std::endl;
+}
+
+////////////////////////////////////////////////////////////
+// Headers
+////////////////////////////////////////////////////////////
+#include <SFML/Network.hpp>
+#include <iostream>
+
+
+////////////////////////////////////////////////////////////
+/// Launch a server, wait for a message, send an answer.
+///
+////////////////////////////////////////////////////////////
+void runUdpServer(unsigned short port)
+{
+    // Create a socket to receive a message from anyone
+    sf::UdpSocket socket;
+
+    // Listen to messages on the specified port
+    if (socket.bind(port) != sf::Socket::Done)
+        return;
+    std::cout << "Server is listening to port " << port << ", waiting for a message... " << std::endl;
+
+    // Wait for a message
+    char in[128];
+    std::size_t received;
+    sf::IpAddress sender;
+    unsigned short senderPort;
+    if (socket.receive(in, sizeof(in), received, sender, senderPort) != sf::Socket::Done)
+        return;
+    std::cout << "Message received from client " << sender << ": \"" << in << "\"" << std::endl;
+
+    // Send an answer to the client
+    const char out[] = "Hi, I'm the server";
+    if (socket.send(out, sizeof(out), sender, senderPort) != sf::Socket::Done)
+        return;
+    std::cout << "Message sent to the client: \"" << out << "\"" << std::endl;
+}
+
+
+////////////////////////////////////////////////////////////
+/// Send a message to the server, wait for the answer
+///
+////////////////////////////////////////////////////////////
+void runUdpClient(unsigned short port)
+{
+    // Ask for the server address
+    sf::IpAddress server;
+    do
+    {
+        std::cout << "Type the address or name of the server to connect to: ";
+        std::cin  >> server;
+    }
+    while (server == sf::IpAddress::None);
+
+    // Create a socket for communicating with the server
+    sf::UdpSocket socket;
+
+    // Send a message to the server
+    const char out[] = "Hi, I'm a client";
+    if (socket.send(out, sizeof(out), server, port) != sf::Socket::Done)
+        return;
+    std::cout << "Message sent to the server: \"" << out << "\"" << std::endl;
+
+    // Receive an answer from anyone (but most likely from the server)
+    char in[128];
+    std::size_t received;
+    sf::IpAddress sender;
+    unsigned short senderPort;
+    if (socket.receive(in, sizeof(in), received, sender, senderPort) != sf::Socket::Done)
+        return;
+    std::cout << "Message received from " << sender << ": \"" << in << "\"" << std::endl;
+}
+
+////////////////////////////////////////////////////////////
+// Headers
+////////////////////////////////////////////////////////////
+#include <SFML/Audio.hpp>
+#include <iostream>
+#include <string>
+
+
+////////////////////////////////////////////////////////////
+/// Play a sound
+///
+////////////////////////////////////////////////////////////
+void playSound()
+{
+    // Load a sound buffer from a wav file
+    sf::SoundBuffer buffer;
+    if (!buffer.loadFromFile("resources/canary.wav"))
+        return;
+
+    // Display sound informations
+    std::cout << "canary.wav:" << std::endl;
+    std::cout << " " << buffer.getDuration().asSeconds() << " seconds"       << std::endl;
+    std::cout << " " << buffer.getSampleRate()           << " samples / sec" << std::endl;
+    std::cout << " " << buffer.getChannelCount()         << " channels"      << std::endl;
+
+    // Create a sound instance and play it
+    sf::Sound sound(buffer);
+    sound.play();
+
+    // Loop while the sound is playing
+    while (sound.getStatus() == sf::Sound::Playing)
+    {
+        // Leave some CPU time for other processes
+        sf::sleep(sf::milliseconds(100));
+
+        // Display the playing position
+        std::cout << "\rPlaying... " << sound.getPlayingOffset().asSeconds() << " sec        ";
+        std::cout << std::flush;
+    }
+    std::cout << std::endl << std::endl;
+}
+
+
+////////////////////////////////////////////////////////////
+/// Play a music
+///
+////////////////////////////////////////////////////////////
+void playMusic(const std::string& filename)
+{
+    // Load an ogg music file
+    sf::Music music;
+    if (!music.openFromFile("resources/" + filename))
+        return;
+
+    // Display music informations
+    std::cout << filename << ":" << std::endl;
+    std::cout << " " << music.getDuration().asSeconds() << " seconds"       << std::endl;
+    std::cout << " " << music.getSampleRate()           << " samples / sec" << std::endl;
+    std::cout << " " << music.getChannelCount()         << " channels"      << std::endl;
+
+    // Play it
+    music.play();
+
+    // Loop while the music is playing
+    while (music.getStatus() == sf::Music::Playing)
+    {
+        // Leave some CPU time for other processes
+        sf::sleep(sf::milliseconds(100));
+
+        // Display the playing position
+        std::cout << "\rPlaying... " << music.getPlayingOffset().asSeconds() << " sec        ";
+        std::cout << std::flush;
+    }
+    std::cout << std::endl << std::endl;
+}
+
+
+////////////////////////////////////////////////////////////
+/// Entry point of application
+///
+/// \return Application exit code
+///
+////////////////////////////////////////////////////////////
+int main()
+{
+    // Play a sound
+    playSound();
+
+    // Play music from an ogg file
+    playMusic("orchestral.ogg");
+
+    // Play music from a flac file
+    playMusic("ding.flac");
+
+    // Wait until the user presses 'enter' key
+    std::cout << "Press enter to exit..." << std::endl;
+    std::cin.ignore(10000, '\n');
+
+    return EXIT_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////
+// Headers
+////////////////////////////////////////////////////////////
+#include <SFML/Audio.hpp>
+#include <iostream>
+
+
+////////////////////////////////////////////////////////////
+/// Entry point of application
+///
+/// \return Application exit code
+///
+////////////////////////////////////////////////////////////
+int main()
+{
+    // Check that the device can capture audio
+    if (sf::SoundRecorder::isAvailable() == false)
+    {
+        std::cout << "Sorry, audio capture is not supported by your system" << std::endl;
+        return EXIT_SUCCESS;
+    }
+
+    // Choose the sample rate
+    unsigned int sampleRate;
+    std::cout << "Please choose the sample rate for sound capture (44100 is CD quality): ";
+    std::cin  >> sampleRate;
+    std::cin.ignore(10000, '\n');
+
+    // Wait for user input...
+    std::cout << "Press enter to start recording audio";
+    std::cin.ignore(10000, '\n');
+
+    // Here we'll use an integrated custom recorder, which saves the captured data into a SoundBuffer
+    sf::SoundBufferRecorder recorder;
+
+    // Audio capture is done in a separate thread, so we can block the main thread while it is capturing
+    recorder.start(sampleRate);
+    std::cout << "Recording... press enter to stop";
+    std::cin.ignore(10000, '\n');
+    recorder.stop();
+
+    // Get the buffer containing the captured data
+    const sf::SoundBuffer& buffer = recorder.getBuffer();
+
+    // Display captured sound informations
+    std::cout << "Sound information:" << std::endl;
+    std::cout << " " << buffer.getDuration().asSeconds() << " seconds"           << std::endl;
+    std::cout << " " << buffer.getSampleRate()           << " samples / seconds" << std::endl;
+    std::cout << " " << buffer.getChannelCount()         << " channels"          << std::endl;
+
+    // Choose what to do with the recorded sound data
+    char choice;
+    std::cout << "What do you want to do with captured sound (p = play, s = save) ? ";
+    std::cin  >> choice;
+    std::cin.ignore(10000, '\n');
+
+    if (choice == 's')
+    {
+        // Choose the filename
+        std::string filename;
+        std::cout << "Choose the file to create: ";
+        std::getline(std::cin, filename);
+
+        // Save the buffer
+        buffer.saveToFile(filename);
+    }
+    else
+    {
+        // Create a sound instance and play it
+        sf::Sound sound(buffer);
+        sound.play();
+
+        // Wait until finished
+        while (sound.getStatus() == sf::Sound::Playing)
+        {
+            // Display the playing position
+            std::cout << "\rPlaying... " << sound.getPlayingOffset().asSeconds() << " sec        ";
+            std::cout << std::flush;
+
+            // Leave some CPU time for other threads
+            sf::sleep(sf::milliseconds(100));
+        }
+    }
+
+    // Finished!
+    std::cout << std::endl << "Done!" << std::endl;
+
+    // Wait until the user presses 'enter' key
+    std::cout << "Press enter to exit..." << std::endl;
+    std::cin.ignore(10000, '\n');
+
+    return EXIT_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////
+// Headers
+////////////////////////////////////////////////////////////
+#include <SFML/Audio.hpp>
+#include <SFML/Network.hpp>
+#include <iostream>
+
+
+const sf::Uint8 audioData   = 1;
+const sf::Uint8 endOfStream = 2;
+
+
+////////////////////////////////////////////////////////////
+/// Specialization of audio recorder for sending recorded audio
+/// data through the network
+////////////////////////////////////////////////////////////
+class NetworkRecorder : public sf::SoundRecorder
+{
+public:
+
+    ////////////////////////////////////////////////////////////
+    /// Constructor
+    ///
+    /// \param host Remote host to which send the recording data
+    /// \param port Port of the remote host
+    ///
+    ////////////////////////////////////////////////////////////
+    NetworkRecorder(const sf::IpAddress& host, unsigned short port) :
+    m_host(host),
+    m_port(port)
+    {
+    }
+
+    ////////////////////////////////////////////////////////////
+    /// Destructor
+    ///
+    /// \see SoundRecorder::~SoundRecorder()
+    ///
+    ////////////////////////////////////////////////////////////
+    ~NetworkRecorder()
+    {
+        // Make sure to stop the recording thread
+        stop();
+    }
+
+private:
+
+    ////////////////////////////////////////////////////////////
+    /// \see SoundRecorder::onStart
+    ///
+    ////////////////////////////////////////////////////////////
+    virtual bool onStart()
+    {
+        if (m_socket.connect(m_host, m_port) == sf::Socket::Done)
+        {
+            std::cout << "Connected to server " << m_host << std::endl;
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
+
+    ////////////////////////////////////////////////////////////
+    /// \see SoundRecorder::onProcessSamples
+    ///
+    ////////////////////////////////////////////////////////////
+    virtual bool onProcessSamples(const sf::Int16* samples, std::size_t sampleCount)
+    {
+        // Pack the audio samples into a network packet
+        sf::Packet packet;
+        packet << audioData;
+        packet.append(samples, sampleCount * sizeof(sf::Int16));
+
+        // Send the audio packet to the server
+        return m_socket.send(packet) == sf::Socket::Done;
+    }
+
+    ////////////////////////////////////////////////////////////
+    /// \see SoundRecorder::onStop
+    ///
+    ////////////////////////////////////////////////////////////
+    virtual void onStop()
+    {
+        // Send a "end-of-stream" packet
+        sf::Packet packet;
+        packet << endOfStream;
+        m_socket.send(packet);
+
+        // Close the socket
+        m_socket.disconnect();
+    }
+
+    ////////////////////////////////////////////////////////////
+    // Member data
+    ////////////////////////////////////////////////////////////
+    sf::IpAddress  m_host;   ///< Address of the remote host
+    unsigned short m_port;   ///< Remote port
+    sf::TcpSocket  m_socket; ///< Socket used to communicate with the server
+};
+
+
+////////////////////////////////////////////////////////////
+/// Create a client, connect it to a running server and
+/// start sending him audio data
+///
+////////////////////////////////////////////////////////////
+void doClient(unsigned short port)
+{
+    // Check that the device can capture audio
+    if (!sf::SoundRecorder::isAvailable())
+    {
+        std::cout << "Sorry, audio capture is not supported by your system" << std::endl;
+        return;
+    }
+
+    // Ask for server address
+    sf::IpAddress server;
+    do
+    {
+        std::cout << "Type address or name of the server to connect to: ";
+        std::cin  >> server;
+    }
+    while (server == sf::IpAddress::None);
+
+    // Create an instance of our custom recorder
+    NetworkRecorder recorder(server, port);
+
+    // Wait for user input...
+    std::cin.ignore(10000, '\n');
+    std::cout << "Press enter to start recording audio";
+    std::cin.ignore(10000, '\n');
+
+    // Start capturing audio data
+    recorder.start(44100);
+    std::cout << "Recording... press enter to stop";
+    std::cin.ignore(10000, '\n');
+    recorder.stop();
+}
+
+////////////////////////////////////////////////////////////
+// Headers
+////////////////////////////////////////////////////////////
+#include <SFML/Audio.hpp>
+#include <SFML/Network.hpp>
+#include <iomanip>
+#include <iostream>
+#include <iterator>
+
+
+const sf::Uint8 audioData   = 1;
+const sf::Uint8 endOfStream = 2;
+
+
+////////////////////////////////////////////////////////////
+/// Customized sound stream for acquiring audio data
+/// from the network
+////////////////////////////////////////////////////////////
+class NetworkAudioStream : public sf::SoundStream
+{
+public:
+
+    ////////////////////////////////////////////////////////////
+    /// Default constructor
+    ///
+    ////////////////////////////////////////////////////////////
+    NetworkAudioStream() :
+    m_offset     (0),
+    m_hasFinished(false)
+    {
+        // Set the sound parameters
+        initialize(1, 44100);
+    }
+
+    ////////////////////////////////////////////////////////////
+    /// Run the server, stream audio data from the client
+    ///
+    ////////////////////////////////////////////////////////////
+    void start(unsigned short port)
+    {
+        if (!m_hasFinished)
+        {
+            // Listen to the given port for incoming connections
+            if (m_listener.listen(port) != sf::Socket::Done)
+                return;
+            std::cout << "Server is listening to port " << port << ", waiting for connections... " << std::endl;
+
+            // Wait for a connection
+            if (m_listener.accept(m_client) != sf::Socket::Done)
+                return;
+            std::cout << "Client connected: " << m_client.getRemoteAddress() << std::endl;
+
+            // Start playback
+            play();
+
+            // Start receiving audio data
+            receiveLoop();
+        }
+        else
+        {
+            // Start playback
+            play();
+        }
+    }
+
+private:
+
+    ////////////////////////////////////////////////////////////
+    /// /see SoundStream::OnGetData
+    ///
+    ////////////////////////////////////////////////////////////
+    virtual bool onGetData(sf::SoundStream::Chunk& data)
+    {
+        // We have reached the end of the buffer and all audio data have been played: we can stop playback
+        if ((m_offset >= m_samples.size()) && m_hasFinished)
+            return false;
+
+        // No new data has arrived since last update: wait until we get some
+        while ((m_offset >= m_samples.size()) && !m_hasFinished)
+            sf::sleep(sf::milliseconds(10));
+
+        // Copy samples into a local buffer to avoid synchronization problems
+        // (don't forget that we run in two separate threads)
+        {
+            sf::Lock lock(m_mutex);
+            m_tempBuffer.assign(m_samples.begin() + m_offset, m_samples.end());
+        }
+
+        // Fill audio data to pass to the stream
+        data.samples     = &m_tempBuffer[0];
+        data.sampleCount = m_tempBuffer.size();
+
+        // Update the playing offset
+        m_offset += m_tempBuffer.size();
+
+        return true;
+    }
+
+    ////////////////////////////////////////////////////////////
+    /// /see SoundStream::OnSeek
+    ///
+    ////////////////////////////////////////////////////////////
+    virtual void onSeek(sf::Time timeOffset)
+    {
+        m_offset = timeOffset.asMilliseconds() * getSampleRate() * getChannelCount() / 1000;
+    }
+
+    ////////////////////////////////////////////////////////////
+    /// Get audio data from the client until playback is stopped
+    ///
+    ////////////////////////////////////////////////////////////
+    void receiveLoop()
+    {
+        while (!m_hasFinished)
+        {
+            // Get waiting audio data from the network
+            sf::Packet packet;
+            if (m_client.receive(packet) != sf::Socket::Done)
+                break;
+
+            // Extract the message ID
+            sf::Uint8 id;
+            packet >> id;
+
+            if (id == audioData)
+            {
+                // Extract audio samples from the packet, and append it to our samples buffer
+                const sf::Int16* samples     = reinterpret_cast<const sf::Int16*>(static_cast<const char*>(packet.getData()) + 1);
+                std::size_t      sampleCount = (packet.getDataSize() - 1) / sizeof(sf::Int16);
+
+                // Don't forget that the other thread can access the sample array at any time
+                // (so we protect any operation on it with the mutex)
+                {
+                    sf::Lock lock(m_mutex);
+                    std::copy(samples, samples + sampleCount, std::back_inserter(m_samples));
+                }
+            }
+            else if (id == endOfStream)
+            {
+                // End of stream reached: we stop receiving audio data
+                std::cout << "Audio data has been 100% received!" << std::endl;
+                m_hasFinished = true;
+            }
+            else
+            {
+                // Something's wrong...
+                std::cout << "Invalid packet received..." << std::endl;
+                m_hasFinished = true;
+            }
+        }
+    }
+
+    ////////////////////////////////////////////////////////////
+    // Member data
+    ////////////////////////////////////////////////////////////
+    sf::TcpListener        m_listener;
+    sf::TcpSocket          m_client;
+    sf::Mutex              m_mutex;
+    std::vector<sf::Int16> m_samples;
+    std::vector<sf::Int16> m_tempBuffer;
+    std::size_t            m_offset;
+    bool                   m_hasFinished;
+};
+
+
+////////////////////////////////////////////////////////////
+/// Launch a server and wait for incoming audio data from
+/// a connected client
+///
+////////////////////////////////////////////////////////////
+void doServer(unsigned short port)
+{
+    // Build an audio stream to play sound data as it is received through the network
+    NetworkAudioStream audioStream;
+    audioStream.start(port);
+
+    // Loop until the sound playback is finished
+    while (audioStream.getStatus() != sf::SoundStream::Stopped)
+    {
+        // Leave some CPU time for other threads
+        sf::sleep(sf::milliseconds(100));
+    }
+
+    std::cin.ignore(10000, '\n');
+
+    // Wait until the user presses 'enter' key
+    std::cout << "Press enter to replay the sound..." << std::endl;
+    std::cin.ignore(10000, '\n');
+
+    // Replay the sound (just to make sure replaying the received data is OK)
+    audioStream.play();
+
+    // Loop until the sound playback is finished
+    while (audioStream.getStatus() != sf::SoundStream::Stopped)
+    {
+        // Leave some CPU time for other threads
+        sf::sleep(sf::milliseconds(100));
+    }
+}
+
+////////////////////////////////////////////////////////////
+// Headers
+////////////////////////////////////////////////////////////
+#include <iomanip>
+#include <iostream>
+#include <cstdlib>
+
+
+////////////////////////////////////////////////////////////
+// Function prototypes
+// (I'm too lazy to put them into separate headers...)
+////////////////////////////////////////////////////////////
+void doClient(unsigned short port);
+void doServer(unsigned short port);
+
+
+////////////////////////////////////////////////////////////
+/// Entry point of application
+///
+/// \return Application exit code
+///
+////////////////////////////////////////////////////////////
+int main()
+{
+    // Choose a random port for opening sockets (ports < 1024 are reserved)
+    const unsigned short port = 2435;
+
+    // Client or server ?
+    char who;
+    std::cout << "Do you want to be a server ('s') or a client ('c')? ";
+    std::cin  >> who;
+
+    if (who == 's')
+    {
+        // Run as a server
+        doServer(port);
+    }
+    else
+    {
+        // Run as a client
+        doClient(port);
+    }
+
+    // Wait until the user presses 'enter' key
+    std::cout << "Press enter to exit..." << std::endl;
+    std::cin.ignore(10000, '\n');
+
+    return EXIT_SUCCESS;
+}
+
+////////////////////////////////////////////////////////////
+// Headers
+////////////////////////////////////////////////////////////
+#include <SFML/Graphics.hpp>
+#include <windows.h>
+#include <cmath>
+
+HWND button;
+
+
+////////////////////////////////////////////////////////////
+/// Function called whenever one of our windows receives a message
+///
+////////////////////////////////////////////////////////////
+LRESULT CALLBACK onEvent(HWND handle, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    switch (message)
+    {
+        // Quit when we close the main window
+        case WM_CLOSE:
+        {
+            PostQuitMessage(0);
+            return 0;
+        }
+
+        // Quit when we click the "quit" button
+        case WM_COMMAND:
+        {
+            if (reinterpret_cast<HWND>(lParam) == button)
+            {
+                PostQuitMessage(0);
+                return 0;
+            }
+        }
+    }
+
+    return DefWindowProc(handle, message, wParam, lParam);
+}
+
+
+////////////////////////////////////////////////////////////
+/// Entry point of application
+///
+/// \param Instance: Instance of the application
+///
+/// \return Error code
+///
+////////////////////////////////////////////////////////////
+int main()
+{
+    HINSTANCE instance = GetModuleHandle(NULL);
+
+    // Define a class for our main window
+    WNDCLASS windowClass;
+    windowClass.style         = 0;
+    windowClass.lpfnWndProc   = &onEvent;
+    windowClass.cbClsExtra    = 0;
+    windowClass.cbWndExtra    = 0;
+    windowClass.hInstance     = instance;
+    windowClass.hIcon         = NULL;
+    windowClass.hCursor       = 0;
+    windowClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_BACKGROUND);
+    windowClass.lpszMenuName  = NULL;
+    windowClass.lpszClassName = TEXT("SFML App");
+    RegisterClass(&windowClass);
+
+    // Let's create the main window
+    HWND window = CreateWindow(TEXT("SFML App"), TEXT("SFML Win32"), WS_SYSMENU | WS_VISIBLE, 200, 200, 660, 520, NULL, NULL, instance, NULL);
+
+    // Add a button for exiting
+    button = CreateWindow(TEXT("BUTTON"), TEXT("Quit"), WS_CHILD | WS_VISIBLE, 560, 440, 80, 40, window, NULL, instance, NULL);
+
+    // Let's create two SFML views
+    HWND view1 = CreateWindow(TEXT("STATIC"), NULL, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, 20,  20, 300, 400, window, NULL, instance, NULL);
+    HWND view2 = CreateWindow(TEXT("STATIC"), NULL, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, 340, 20, 300, 400, window, NULL, instance, NULL);
+    sf::RenderWindow SFMLView1(view1);
+    sf::RenderWindow SFMLView2(view2);
+
+    // Load some textures to display
+    sf::Texture texture1, texture2;
+    if (!texture1.loadFromFile("resources/image1.jpg") || !texture2.loadFromFile("resources/image2.jpg"))
+        return EXIT_FAILURE;
+    sf::Sprite sprite1(texture1);
+    sf::Sprite sprite2(texture2);
+    sprite1.setOrigin(sf::Vector2f(texture1.getSize()) / 2.f);
+    sprite1.setPosition(sprite1.getOrigin());
+
+    // Create a clock for measuring elapsed time
+    sf::Clock clock;
+
+    // Loop until a WM_QUIT message is received
+    MSG message;
+    message.message = static_cast<UINT>(~WM_QUIT);
+    while (message.message != WM_QUIT)
+    {
+        if (PeekMessage(&message, NULL, 0, 0, PM_REMOVE))
+        {
+            // If a message was waiting in the message queue, process it
+            TranslateMessage(&message);
+            DispatchMessage(&message);
+        }
+        else
+        {
+            float time = clock.getElapsedTime().asSeconds();
+
+            // Clear views
+            SFMLView1.clear();
+            SFMLView2.clear();
+
+            // Draw sprite 1 on view 1
+            sprite1.setRotation(time * 100);
+            SFMLView1.draw(sprite1);
+
+            // Draw sprite 2 on view 2
+            sprite2.setPosition(std::cos(time) * 100.f, 0.f);
+            SFMLView2.draw(sprite2);
+
+            // Display each view on screen
+            SFMLView1.display();
+            SFMLView2.display();
+        }
+    }
+
+    // Destroy the main window (all its child controls will be destroyed)
+    DestroyWindow(window);
+
+    // Don't forget to unregister the window class
+    UnregisterClass(TEXT("SFML App"), instance);
+
+    return EXIT_SUCCESS;
+}
+////////////////////////////////////////////////////////////
+// Headers
+////////////////////////////////////////////////////////////
+#include <SFML/Window.hpp>
+#include <SFML/OpenGL.hpp>
+
+
+////////////////////////////////////////////////////////////
+/// Entry point of application
+///
+/// \return Application exit code
+///
+////////////////////////////////////////////////////////////
+int main()
+{
+    // Request a 24-bits depth buffer when creating the window
+    sf::ContextSettings contextSettings;
+    contextSettings.depthBits = 24;
+
+    // Create the main window
+    sf::Window window(sf::VideoMode(640, 480), "SFML window with OpenGL", sf::Style::Default, contextSettings);
+
+    // Make it the active window for OpenGL calls
+    window.setActive();
+
+    // Set the color and depth clear values
+    glClearDepth(1.f);
+    glClearColor(0.f, 0.f, 0.f, 1.f);
+
+    // Enable Z-buffer read and write
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+
+    // Disable lighting and texturing
+    glDisable(GL_LIGHTING);
+    glDisable(GL_TEXTURE_2D);
+
+    // Configure the viewport (the same size as the window)
+    glViewport(0, 0, window.getSize().x, window.getSize().y);
+
+    // Setup a perspective projection
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    GLfloat ratio = static_cast<float>(window.getSize().x) / window.getSize().y;
+    glFrustum(-ratio, ratio, -1.f, 1.f, 1.f, 500.f);
+
+    // Define a 3D cube (6 faces made of 2 triangles composed by 3 vertices)
+    GLfloat cube[] =
+    {
+        // positions    // colors (r, g, b, a)
+        -50, -50, -50,  0, 0, 1, 1,
+        -50,  50, -50,  0, 0, 1, 1,
+        -50, -50,  50,  0, 0, 1, 1,
+        -50, -50,  50,  0, 0, 1, 1,
+        -50,  50, -50,  0, 0, 1, 1,
+        -50,  50,  50,  0, 0, 1, 1,
+
+         50, -50, -50,  0, 1, 0, 1,
+         50,  50, -50,  0, 1, 0, 1,
+         50, -50,  50,  0, 1, 0, 1,
+         50, -50,  50,  0, 1, 0, 1,
+         50,  50, -50,  0, 1, 0, 1,
+         50,  50,  50,  0, 1, 0, 1,
+
+        -50, -50, -50,  1, 0, 0, 1,
+         50, -50, -50,  1, 0, 0, 1,
+        -50, -50,  50,  1, 0, 0, 1,
+        -50, -50,  50,  1, 0, 0, 1,
+         50, -50, -50,  1, 0, 0, 1,
+         50, -50,  50,  1, 0, 0, 1,
+
+        -50,  50, -50,  0, 1, 1, 1,
+         50,  50, -50,  0, 1, 1, 1,
+        -50,  50,  50,  0, 1, 1, 1,
+        -50,  50,  50,  0, 1, 1, 1,
+         50,  50, -50,  0, 1, 1, 1,
+         50,  50,  50,  0, 1, 1, 1,
+
+        -50, -50, -50,  1, 0, 1, 1,
+         50, -50, -50,  1, 0, 1, 1,
+        -50,  50, -50,  1, 0, 1, 1,
+        -50,  50, -50,  1, 0, 1, 1,
+         50, -50, -50,  1, 0, 1, 1,
+         50,  50, -50,  1, 0, 1, 1,
+
+        -50, -50,  50,  1, 1, 0, 1,
+         50, -50,  50,  1, 1, 0, 1,
+        -50,  50,  50,  1, 1, 0, 1,
+        -50,  50,  50,  1, 1, 0, 1,
+         50, -50,  50,  1, 1, 0, 1,
+         50,  50,  50,  1, 1, 0, 1,
+    };
+
+    // Enable position and color vertex components
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glEnableClientState(GL_COLOR_ARRAY);
+    glVertexPointer(3, GL_FLOAT, 7 * sizeof(GLfloat), cube);
+    glColorPointer(4, GL_FLOAT, 7 * sizeof(GLfloat), cube + 3);
+
+    // Disable normal and texture coordinates vertex components
+    glDisableClientState(GL_NORMAL_ARRAY);
+    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+
+    // Create a clock for measuring the time elapsed
+    sf::Clock clock;
+
+    // Start the game loop
+    while (window.isOpen())
+    {
+        // Process events
+        sf::Event event;
+        while (window.pollEvent(event))
+        {
+            // Close window: exit
+            if (event.type == sf::Event::Closed)
+                window.close();
+
+            // Escape key: exit
+            if ((event.type == sf::Event::KeyPressed) && (event.key.code == sf::Keyboard::Escape))
+                window.close();
+
+            // Resize event: adjust the viewport
+            if (event.type == sf::Event::Resized)
+                glViewport(0, 0, event.size.width, event.size.height);
+        }
+
+        // Clear the color and depth buffers
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        // Apply some transformations to rotate the cube
+        glMatrixMode(GL_MODELVIEW);
+        glLoadIdentity();
+        glTranslatef(0.f, 0.f, -200.f);
+        glRotatef(clock.getElapsedTime().asSeconds() * 50, 1.f, 0.f, 0.f);
+        glRotatef(clock.getElapsedTime().asSeconds() * 30, 0.f, 1.f, 0.f);
+        glRotatef(clock.getElapsedTime().asSeconds() * 90, 0.f, 0.f, 1.f);
+
+        // Draw the cube
+        glDrawArrays(GL_TRIANGLES, 0, 36);
+
+        // Finally, display the rendered frame on screen
+        window.display();
+    }
+
+    return EXIT_SUCCESS;
+}
