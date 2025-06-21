@@ -5,7 +5,8 @@ namespace ArkanoidGame
 	sf::Vector2f GetTextOrigin(const sf::Text& text, const sf::Vector2f& relativePosition)
 	{
 		sf::FloatRect textSize = text.getLocalBounds();
-		return {
+		return
+		{
 			(textSize.left + textSize.width) * relativePosition.x,
 			(textSize.top + textSize.height) * relativePosition.y,
 		};

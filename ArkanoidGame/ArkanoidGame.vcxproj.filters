@@ -64,6 +64,9 @@
     <ClCompile Include="ThreeHitBlock.cpp">
       <Filter>Sources</Filter>
     </ClCompile>
+    <ClCompile Include="Bonus.cpp">
+      <Filter>Sources</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Game.h">
@@ -108,5 +111,6 @@
     </ClInclude>
     <ClInclude Include="IDelayedAction.h" />
     <ClInclude Include="ThreeHitBlock.h" />
+    <ClInclude Include="Bonus.h" />
   </ItemGroup>
 </Project>

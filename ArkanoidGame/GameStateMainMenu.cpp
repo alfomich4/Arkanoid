@@ -144,7 +144,7 @@ namespace ArkanoidGame
 
 	void GameStateMainMenuData::Draw(sf::RenderWindow& window)
 	{
-		sf::Vector2f viewSize = (sf::Vector2f)window.getView().getSize();
+		sf::Vector2f viewSize = window.getView().getSize();
 
 		sf::Text* hintText = &menu.GetCurrentContext().hintText;
 		hintText->setOrigin(GetTextOrigin(*hintText, { 0.5f, 0.f }));

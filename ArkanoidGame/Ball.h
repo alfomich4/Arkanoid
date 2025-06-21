@@ -17,10 +17,13 @@ namespace ArkanoidGame
 
 		bool GetCollision(std::shared_ptr<Colladiable> collidable) const  override;
 		void ChangeAngle(float x);
+		void SetSpeedMultiplier(float m) { speedMultiplier = m; }
+		void ResetSpeedMultiplier() { speedMultiplier = 1.f; }
 	private:
 		void OnHit();
 		sf::Vector2f direction;
 		float lastAngle = 90;
+		float speedMultiplier = 1.f;
 	};
 }
 

@@ -2,7 +2,8 @@
 #include "GameSettings.h"
 
 
-namespace ArkanoidGame {
+namespace ArkanoidGame 
+{
 
 	ThreeHitBlock::ThreeHitBlock(const sf::Vector2f& position)
 		: SmoothDestroyableBlock(position, sf::Color::Magenta)

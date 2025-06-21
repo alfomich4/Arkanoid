@@ -3,6 +3,8 @@
 
 namespace ArkanoidGame
 {
+	
+	
 	// Resources path
 	const std::string RESOURCES_PATH = "Resources/";
 	const std::string TEXTURES_PATH = RESOURCES_PATH + "Textures/";
@@ -34,4 +36,5 @@ namespace ArkanoidGame
 
 	const std::string GAME_NAME = "ArkanoidGame";
 	const float BREAK_DELAY = 1.f;
+
 }

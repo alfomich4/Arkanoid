@@ -4,7 +4,8 @@
 
 namespace ArkanoidGame
 {
-	class Colladiable {
+	class Colladiable 
+	{
 	protected:
 		virtual void OnHit() = 0;
 	public:

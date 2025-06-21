@@ -153,7 +153,8 @@ namespace ArkanoidGame
 
 	void Game::SetOption(GameOptions option, bool value)
 	{
-		if (value) {
+		if (value)
+		{
 			options = (GameOptions)((std::uint8_t)options | (std::uint8_t)option);
 		}
 		else {

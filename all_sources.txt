@@ -29,7 +29,8 @@ namespace ArkanoidGame
 
 			game.HandleWindowEvents(window);
 
-			if (!window.isOpen()) {
+			if (!window.isOpen())
+			{
 				break;
 			}
 
@@ -113,7 +114,8 @@ namespace ArkanoidGame
 
 	void Ball::Update(float timeDelta)
 	{
-		const auto pos = sprite.getPosition() + BALL_SPEED * timeDelta * direction;
+		const auto pos = sprite.getPosition() + BALL_SPEED * speedMultiplier * timeDelta * direction;
+
 		sprite.setPosition(pos);
 
 		if (pos.x - BALL_SIZE / 2.f <= 0 || pos.x + BALL_SIZE / 2.f >= SCREEN_WIDTH) {
@@ -173,10 +175,13 @@ namespace ArkanoidGame
 
 		bool GetCollision(std::shared_ptr<Colladiable> collidable) const  override;
 		void ChangeAngle(float x);
+		void SetSpeedMultiplier(float m) { speedMultiplier = m; }
+		void ResetSpeedMultiplier() { speedMultiplier = 1.f; }
 	private:
 		void OnHit();
 		sf::Vector2f direction;
 		float lastAngle = 90;
+		float speedMultiplier = 1.f;
 	};
 }
 
@@ -332,7 +337,8 @@ namespace ArkanoidGame
 
 namespace ArkanoidGame
 {
-	class Colladiable {
+	class Colladiable 
+	{
 	protected:
 		virtual void OnHit() = 0;
 	public:
@@ -423,6 +429,7 @@ namespace ArkanoidGame
 		if (pendingGameStateType != GameStateType::None)
 		{
 			stateStack.push_back(GameState(pendingGameStateType, pendingGameStateIsExclusivelyVisible));
+			
 		}
 
 		stateChangeType = GameStateChangeType::None;
@@ -501,7 +508,8 @@ namespace ArkanoidGame
 
 	void Game::SetOption(GameOptions option, bool value)
 	{
-		if (value) {
+		if (value)
+		{
 			options = (GameOptions)((std::uint8_t)options | (std::uint8_t)option);
 		}
 		else {
@@ -651,6 +659,8 @@ namespace ArkanoidGame
 
 namespace ArkanoidGame
 {
+	
+	
 	// Resources path
 	const std::string RESOURCES_PATH = "Resources/";
 	const std::string TEXTURES_PATH = RESOURCES_PATH + "Textures/";
@@ -682,6 +692,7 @@ namespace ArkanoidGame
 
 	const std::string GAME_NAME = "ArkanoidGame";
 	const float BREAK_DELAY = 1.f;
+
 }
 #include "GameState.h"
 #include "GameStateData.h"
@@ -737,7 +748,8 @@ namespace ArkanoidGame
 			assert(false); // We want to know if we forgot to implement new game state
 			break;
 		}
-		if (data) {
+		if (data) 
+		{
 			data->Init();
 		}
 	}
@@ -1235,7 +1247,7 @@ namespace ArkanoidGame
 
 	void GameStateMainMenuData::Draw(sf::RenderWindow& window)
 	{
-		sf::Vector2f viewSize = (sf::Vector2f)window.getView().getSize();
+		sf::Vector2f viewSize = window.getView().getSize();
 
 		sf::Text* hintText = &menu.GetCurrentContext().hintText;
 		hintText->setOrigin(GetTextOrigin(*hintText, { 0.5f, 0.f }));
@@ -1390,8 +1402,10 @@ namespace ArkanoidGame
 #include "Text.h"
 #include "ThreeHitBlock.h"
 
+#include "randomizer.h" 
 #include <assert.h>
 #include <sstream>
+
 
 namespace ArkanoidGame
 {
@@ -1401,14 +1415,26 @@ namespace ArkanoidGame
 		assert(font.loadFromFile(FONTS_PATH + "Roboto-Regular.ttf"));
 		assert(gameOverSoundBuffer.loadFromFile(SOUNDS_PATH + "Death.wav"));
 
+
 		// Init background
 		background.setSize(sf::Vector2f(SCREEN_WIDTH, SCREEN_HEIGHT));
 		background.setPosition(0.f, 0.f);
 		background.setFillColor(sf::Color(0, 0, 0));
 
+		sizeBuffTex.loadFromFile(TEXTURES_PATH + "SizeBuff.png");
+		speedBuffTex.loadFromFile(TEXTURES_PATH + "SpeedBuff.png");
+		reduceSpeedTex.loadFromFile(TEXTURES_PATH + "ReduceSpeed.png");
+
+		score = 0;
+		lives = 3;
 		scoreText.setFont(font);
 		scoreText.setCharacterSize(24);
 		scoreText.setFillColor(sf::Color::Yellow);
+
+		livesText.setFont(font);
+		livesText.setCharacterSize(24);
+		livesText.setFillColor(sf::Color::Red);
+		
 
 		inputHintText.setFont(font);
 		inputHintText.setCharacterSize(24);
@@ -1416,8 +1442,12 @@ namespace ArkanoidGame
 		inputHintText.setString("Use arrow keys to move, ESC to pause");
 		inputHintText.setOrigin(GetTextOrigin(inputHintText, { 1.f, 0.f }));
 
-		gameObjects.emplace_back(std::make_shared<Platform>(sf::Vector2f({ SCREEN_WIDTH / 2.0, SCREEN_HEIGHT - PLATFORM_HEIGHT / 2.f })));
-		gameObjects.emplace_back(std::make_shared<Ball>(sf::Vector2f({ SCREEN_WIDTH / 2.f, SCREEN_HEIGHT - PLATFORM_HEIGHT - BALL_SIZE / 2.f } )));
+		initialPlatformPos = { SCREEN_WIDTH / 2.f, SCREEN_HEIGHT - PLATFORM_HEIGHT / 2.f };
+		initialBallPos = { SCREEN_WIDTH / 2.f, SCREEN_HEIGHT - PLATFORM_HEIGHT - BALL_SIZE / 2.f };
+
+		gameObjects.clear();
+		gameObjects.emplace_back(std::make_shared<Platform>(initialPlatformPos));
+		gameObjects.emplace_back(std::make_shared<Ball>(initialBallPos));
 		createBlocks();
 
 		// Init sounds
@@ -1435,72 +1465,225 @@ namespace ArkanoidGame
 		}
 	}
 
+	
+
 	void GameStatePlayingData::Update(float timeDelta)
 	{
-		static auto updateFunctor = [timeDelta](auto obj) { obj->Update(timeDelta); };
+		elapsedTime += timeDelta;
 
+		// ѕеребираем падающие бонусы
+		for (auto it = fallingBonuses.begin(); it != fallingBonuses.end(); )
+		{
+			// падают вниз, скорость падени€ 200 px/sec
+			it->sprite.move(0.f, 200.f * timeDelta);
+
+			// если подхватил платформой
+			if (std::dynamic_pointer_cast<Platform>(gameObjects[0])->GetRect().intersects(
+				it->sprite.getGlobalBounds()))
+			{
+				// активируем эффект на 10 сек
+				activeEffects.push_back({ it->type, elapsedTime + 10.f });
+				it = fallingBonuses.erase(it);
+			}
+			// если улетел за экран
+			else if (it->sprite.getPosition().y > SCREEN_HEIGHT)
+			{
+				it = fallingBonuses.erase(it);
+			}
+			else
+			{
+				++it;
+			}
+		}
+
+		auto platform = std::dynamic_pointer_cast<Platform>(gameObjects[0]);
+		auto ball = std::dynamic_pointer_cast<Ball>(gameObjects[1]);
+
+		// сначала сбросим всЄ к дефолту
+		platform->ResetSizeMultiplier();
+		platform->ResetSpeedMultiplier();
+		ball->ResetSpeedMultiplier();
+
+		// затем дл€ каждого действующего эффекта
+		for (auto it = activeEffects.begin(); it != activeEffects.end(); )
+		{
+			if (elapsedTime <= it->expiresAt)
+			{
+				// ещЄ действует
+				switch (it->type)
+				{
+				case BonusType::EnlargePlatform:
+					platform->SetSizeMultiplier(2.f);
+					break;
+				case BonusType::FastPlatform:
+					platform->SetSpeedMultiplier(2.f);
+					break;
+				case BonusType::SlowBall:
+					ball->SetSpeedMultiplier(0.5f);
+					break;
+				}
+				++it;
+			}
+			else
+			{
+				// истЄк Ч убираем из списка
+				it = activeEffects.erase(it);
+			}
+		}
+		// 1) ќбновл€ем все игровые объекты (платформу и м€ч) и блоки
+		static auto updateFunctor = [timeDelta](auto obj) { obj->Update(timeDelta); };
 		std::for_each(gameObjects.begin(), gameObjects.end(), updateFunctor);
 		std::for_each(blocks.begin(), blocks.end(), updateFunctor);
 
+		// 2) ѕолучаем платформу и м€ч
+		auto platform = std::dynamic_pointer_cast<Platform>(gameObjects[0]);
+		auto ball = std::dynamic_pointer_cast<Ball>(gameObjects[1]);
 
-		std::shared_ptr <Platform> platform = std::dynamic_pointer_cast<Platform>(gameObjects[0]);
-		std::shared_ptr<Ball> ball = std::dynamic_pointer_cast<Ball>(gameObjects[1]);
+		// 3) ѕровер€ем, задел ли м€ч платформу
+		bool isCollision = platform->CheckCollision(ball);
 
-		auto isCollision = platform->CheckCollision(ball);
+		// 4) ѕровер€ем, упал ли м€ч за пределы экрана (ниже платформы)
+		bool ballBelow = ball->GetPosition().y > platform->GetRect().top;
 
+		// 5) ќбработка потери жизни
+		if (ballBelow && !isCollision)
+		{
+			
+			if (lives > 1)
+			{
+				// ещЄ есть жизни Ч отнимаем одну, сбрасываем м€ч и платформу
+				--lives;
+				
+
+				// пересоздаЄм платформу и м€ч в стартовых позици€х
+				gameObjects[0] = std::make_shared<Platform>(initialPlatformPos);
+				gameObjects[1] = std::make_shared<Ball>(initialBallPos);
+
+				// выходим из Update, чтобы не обрабатывать больше столкновений в этом кадре
+				return;
+			}
+			else
+			{
+				// это была последн€€ жизнь Ч Game Over
+				Game& game = Application::Instance().GetGame();
+				game.UpdateRecord(PLAYER_NAME, score);
+				gameOverSound.play();
+				game.PushState(GameStateType::GameOver, false);
+				return;
+			}
+		}
+
+		// 6) ќбработка столкновений м€ча с блоками и начисление очков
 		bool needInverseDirX = false;
 		bool needInverseDirY = false;
 
-
 		bool hasBrokeOneBlock = false;
-		//remove-erase idiom
+		std::vector<std::shared_ptr<Block>> brokenBlocks;
+
 		blocks.erase(
 			std::remove_if(blocks.begin(), blocks.end(),
-				[ball, &hasBrokeOneBlock, &needInverseDirX, &needInverseDirY, this](auto block) {
-					if ((!hasBrokeOneBlock) && block->CheckCollision(ball)) {
+				[ball, &hasBrokeOneBlock, &needInverseDirX, &needInverseDirY, &brokenBlocks, this](auto block) {
+					// детектируем первое столкновение за кадр
+					if (!hasBrokeOneBlock && block->CheckCollision(ball))
+					{
 						hasBrokeOneBlock = true;
-						const auto ballPos = ball->GetPosition();
-						const auto blockRect = block->GetRect();
-
-						GetBallInverse(ballPos, blockRect, needInverseDirX, needInverseDirY);
+						GetBallInverse(ball->GetPosition(), block->GetRect(), needInverseDirX, needInverseDirY);
 					}
-					return block->IsBroken();
+					// если блок сломан Ч запомним его и удалим
+					if (block->IsBroken())
+					{
+						brokenBlocks.push_back(block);
+						return true;
+					}
+					return false;
 				}),
 			blocks.end()
-					);
-		if (needInverseDirX) {
+		);
+
+		// начисл€ем очки за все сломанные блоки
+		for (auto& b : brokenBlocks)
+		{
+			if (std::dynamic_pointer_cast<ThreeHitBlock>(b))
+			{
+				score += 2;
+			}
+			else
+			{
+				score += 1;
+			}
+		}
+		for (auto& b : brokenBlocks)
+		{
+			// 10% шанс выпасть бонусу
+			if (random<float>(0.f, 1.f) < 0.1f)
+			{
+				// случайный тип из трЄх
+				int r = random<int>(0, 2);
+				Bonus bonus;
+				bonus.type = static_cast<BonusType>(r);
+				switch (bonus.type)
+				{
+				case BonusType::EnlargePlatform:
+					bonus.texture = &sizeBuffTex;    break;
+				case BonusType::FastPlatform:
+					bonus.texture = &speedBuffTex;   break;
+				case BonusType::SlowBall:
+					bonus.texture = &reduceSpeedTex; break;
+				}
+				bonus.sprite.setTexture(*bonus.texture);
+				// центрируем и задаЄм размер
+				InitSprite(bonus.sprite, 32, 32, *bonus.texture);
+				// ставим сверху блока
+				bonus.sprite.setPosition(b->GetPosition());
+				fallingBonuses.push_back(bonus);
+			}
+		}
+
+		scoreText.setString("Score: " + std::to_string(score));
+		livesText.setString("Lives: " + std::to_string(lives));
+
+		// 7) »нвертируем направление м€ча, если нужно
+		if (needInverseDirX)
+		{
 			ball->InvertDirectionX();
 		}
-		if (needInverseDirY) {
+		if (needInverseDirY)
+		{
 			ball->InvertDirectionY();
 		}
 
-		const bool isGameWin = blocks.size() == 0;
-		const bool isGameOver = !isCollision && ball->GetPosition().y > platform->GetRect().top;
-		Game& game = Application::Instance().GetGame();
+		
 
-		if (isGameWin) {
+		// 8) ѕровер€ем, выиграл ли игрок (не осталось блоков)
+		Game& game = Application::Instance().GetGame();
+		if (blocks.empty())
+		{
 			game.PushState(GameStateType::GameWin, false);
 		}
-		else if (isGameOver) {
-			gameOverSound.play();
-			game.PushState(GameStateType::GameOver, false);
-		}
+		
 	}
+
 
 	void GameStatePlayingData::Draw(sf::RenderWindow& window)
 	{
+		for (auto& b : fallingBonuses)
+		{
+			window.draw(b.sprite);
+		}
 		// Draw background
 		window.draw(background);
-
+		
 		static auto drawFunc = [&window](auto block) { block->Draw(window); };
 		// Draw game objects
 		std::for_each(gameObjects.begin(), gameObjects.end(), drawFunc);
 		std::for_each(blocks.begin(), blocks.end(), drawFunc);
 
-		scoreText.setOrigin(GetTextOrigin(scoreText, { 0.f, 0.f }));
+		scoreText.setOrigin(GetTextOrigin(scoreText,{ 0.f, 0.f }));
 		scoreText.setPosition(10.f, 10.f);
 		window.draw(scoreText);
+		livesText.setOrigin(GetTextOrigin(scoreText,{ 0.f,0.f }));
+		livesText.setPosition(120.f, 10.f);
+		window.draw(livesText);
 
 		sf::Vector2f viewSize = window.getView().getSize();
 		inputHintText.setPosition(viewSize.x - 10.f, 10.f);
@@ -1510,19 +1693,23 @@ namespace ArkanoidGame
 	void GameStatePlayingData::createBlocks() 
 	{
 		int row = 0;
-		for (; row < BLOCKS_COUNT_ROWS; ++row) {
-			for (int col = 0; col < BLOCKS_COUNT_IN_ROW; ++col) {
+		for (; row < BLOCKS_COUNT_ROWS; ++row)
+		{
+			for (int col = 0; col < BLOCKS_COUNT_IN_ROW; ++col) 
+			{
 				blocks.emplace_back(std::make_shared<SmoothDestroyableBlock>(sf::Vector2f({ BLOCK_SHIFT + BLOCK_WIDTH / 2.f + col * (BLOCK_WIDTH + BLOCK_SHIFT), 100.f + row * BLOCK_HEIGHT })));
 			}
 		}
-
-		for (int col = 0; col < 3; ++col) {
-			blocks.emplace_back(std::make_shared<UnbreackableBlock>(sf::Vector2f({ BLOCK_SHIFT + BLOCK_WIDTH / 2.f + col * (BLOCK_WIDTH + BLOCK_SHIFT), 100.f + row * BLOCK_HEIGHT })));
-		}
-		for (int col = 4; col < 7; ++col) {
+		
+		
+		for (int col = 0; col < 15; ++col) 
+		{
 			blocks.emplace_back(std::make_shared<ThreeHitBlock>(sf::Vector2f({ BLOCK_SHIFT + BLOCK_WIDTH / 2.f + col * (BLOCK_WIDTH + BLOCK_SHIFT), 100.f + row * BLOCK_HEIGHT })));
 		}
+		
 	}
+
+	
 
 	void GameStatePlayingData::GetBallInverse(const sf::Vector2f& ballPos, const sf::FloatRect& blockRect, bool& needInverseDirX, bool& needInverseDirY) {
 
@@ -1547,13 +1734,23 @@ namespace ArkanoidGame
 #include "Platform.h"
 #include "Ball.h"
 
+
 namespace ArkanoidGame
 {
 	class Game;
 	class Block;
+	enum class BonusType { EnlargePlatform, FastPlatform, SlowBall };
+
+	struct Bonus
+	{
+		BonusType      type;
+		sf::Sprite     sprite;
+		sf::Texture* texture;    // указатель на одно из трЄх заранее загруженных
+	};
 
 	class GameStatePlayingData : public GameStateData
 	{
+
 	public:
 		void Init() override;
 		void HandleWindowEvent(const sf::Event& event) override;
@@ -1566,20 +1763,31 @@ namespace ArkanoidGame
 			bool& needInverseDirY);
 
 		// Resources
-		sf::Texture appleTexture;
-		sf::Texture rockTexture;
+		
 		sf::Font font;
 		sf::SoundBuffer eatAppleSoundBuffer;
 		sf::SoundBuffer gameOverSoundBuffer;
+		sf::Texture bonusTextureSize, bonusTextureSpeed, bonusTextureReduce;
 
 		// Game data
 		std::vector<std::shared_ptr<GameObject>> gameObjects;
 		std::vector<std::shared_ptr<Block>> blocks;
+		
 
 		// UI data
+		std::vector<Bonus> fallingBonuses;
+		struct ActiveEffect { BonusType type; float expiresAt; };
+		std::vector<ActiveEffect> activeEffects;
+		sf::Texture sizeBuffTex, speedBuffTex, reduceSpeedTex;
+		float elapsedTime = 0.f;         
+		int score = 0;
+		int lives = 3;
+		sf::Text livesText;
 		sf::Text scoreText;
 		sf::Text inputHintText;
 		sf::RectangleShape background;
+		sf::Vector2f initialBallPos;            
+		sf::Vector2f initialPlatformPos;        
 
 		// Sounds
 		sf::Sound gameOverSound;
@@ -1747,7 +1955,8 @@ namespace ArkanoidGame
 		rootItem = item;
 
 		InitMenuItem(rootItem);
-		if (!rootItem.childrens.empty()) {
+		if (!rootItem.childrens.empty()) 
+		{
 			SelectMenuItem(rootItem.childrens.front());
 		}
 	}
@@ -1767,7 +1976,8 @@ namespace ArkanoidGame
 
 		std::vector<sf::Text*> texts;
 		texts.reserve(expandedItem.childrens.size());
-		for (auto& child : expandedItem.childrens) {
+		for (auto& child : expandedItem.childrens)
+		{
 			if (child.isEnabled) {
 				texts.push_back(&child.text);
 			}
@@ -1951,18 +2161,18 @@ namespace ArkanoidGame
 	{
 		if (sf::Keyboard::isKeyPressed(sf::Keyboard::Left))
 		{
-			Move(-timeDelta * PLATFORM_SPEED);
+			Move(-timeDelta * PLATFORM_SPEED* speedMultiplier);
 		}
 		else if (sf::Keyboard::isKeyPressed(sf::Keyboard::Right))
 		{
-			Move(timeDelta * PLATFORM_SPEED);
+			Move(timeDelta * PLATFORM_SPEED* speedMultiplier);
 		}
 	}
 
 	void Platform::Move(float speed)
 	{
 		auto position = sprite.getPosition();
-		position.x = std::clamp(position.x + speed, PLATFORM_WIDTH / 2.f, SCREEN_WIDTH - PLATFORM_WIDTH / 2.f);
+		position.x = std::clamp(position.x + speed,( PLATFORM_WIDTH * speedMultiplier) / 2.f, SCREEN_WIDTH - (PLATFORM_WIDTH * speedMultiplier) / 2.f);
 		sprite.setPosition(position);
 	}
 
@@ -2016,8 +2226,14 @@ namespace ArkanoidGame
 		bool GetCollision(std::shared_ptr<Colladiable> collidable) const override;
 		void OnHit() override {}
 		bool CheckCollision(std::shared_ptr<Colladiable> collidable) override;
+		void SetSpeedMultiplier(float m) { speedMultiplier = m; }
+		void ResetSpeedMultiplier() { speedMultiplier = 1.f; }
+
+		void SetSizeMultiplier(float m) { sprite.setScale(m, m); }  // увеличивает размер спрайта
+		void ResetSizeMultiplier() { sprite.setScale(1.f, 1.f); }
 	private:
 		void Move(float speed);
+		float speedMultiplier = 1.f;
 	};
 }#pragma once
 
@@ -2169,7 +2385,8 @@ namespace ArkanoidGame
 	sf::Vector2f GetTextOrigin(const sf::Text& text, const sf::Vector2f& relativePosition)
 	{
 		sf::FloatRect textSize = text.getLocalBounds();
-		return {
+		return
+		{
 			(textSize.left + textSize.width) * relativePosition.x,
 			(textSize.top + textSize.height) * relativePosition.y,
 		};
@@ -2236,8 +2453,6 @@ namespace ArkanoidGame
 }
 #pragma once
 #include <SFML/Graphics.hpp>
-#include "Vector.h"
-
 namespace ArkanoidGame
 {
 	// Helper method for organizing text items
@@ -2261,7 +2476,8 @@ namespace ArkanoidGame
 #include "GameSettings.h"
 
 
-namespace ArkanoidGame {
+namespace ArkanoidGame 
+{
 
 	ThreeHitBlock::ThreeHitBlock(const sf::Vector2f& position)
 		: SmoothDestroyableBlock(position, sf::Color::Magenta)
@@ -2311,53 +2527,6 @@ namespace ArkanoidGame {
 	};
 }
 
-#pragma once
-
-namespace ArkanoidGame
-{
-	template<typename T>
-	struct Vector2D
-	{
-		T x = (T)0;
-		T y = (T)0;
-	};
-
-	using Vector2Df = Vector2D<float>;
-	using Vector2Di = Vector2D<int>;
-	using Position = Vector2Df;
-
-	template<typename T>
-	Vector2D<T> operator+(const Vector2D<T>& lhs, const Vector2D<T>& rhs)
-	{
-		return { lhs.x + rhs.x, lhs.y + rhs.y };
-	}
-
-	template<typename T>
-	Vector2D<T> operator-(const Vector2D<T>& lhs, const Vector2D<T>& rhs)
-	{
-		return { lhs.x - rhs.x, lhs.y - rhs.y };
-	}
-
-	template<typename T>
-	bool operator==(const Vector2D<T>& lhs, const Vector2D<T>& rhs)
-	{
-		return lhs.x == rhs.x && lhs.y == rhs.y;
-	}
-
-	template<typename T>
-	float GetVectorLength(const Vector2D<T>& vector)
-	{
-		return sqrtf(vector.x * vector.x + vector.y * vector.y);
-	}
-
-	// This complex template allows us to convert any vector type to any other vector type (like our Vector2D to SFML's Vector and vice versa)
-	template<typename U, typename V>
-	U Convert(const V& v)
-	{
-		// decltype deduces type from expression
-		return { static_cast<decltype(U::x)>(v.x), static_cast<decltype(U::y)>(v.y) };
-	}
-}
 
 ////////////////////////////////////////////////////////////
 // Headers

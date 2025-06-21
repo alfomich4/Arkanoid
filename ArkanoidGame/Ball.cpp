@@ -23,7 +23,8 @@ namespace ArkanoidGame
 
 	void Ball::Update(float timeDelta)
 	{
-		const auto pos = sprite.getPosition() + BALL_SPEED * timeDelta * direction;
+		const auto pos = sprite.getPosition() + BALL_SPEED * speedMultiplier * timeDelta * direction;
+
 		sprite.setPosition(pos);
 
 		if (pos.x - BALL_SIZE / 2.f <= 0 || pos.x + BALL_SIZE / 2.f >= SCREEN_WIDTH) {

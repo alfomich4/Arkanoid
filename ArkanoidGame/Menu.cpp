@@ -8,7 +8,8 @@ namespace ArkanoidGame
 		rootItem = item;
 
 		InitMenuItem(rootItem);
-		if (!rootItem.childrens.empty()) {
+		if (!rootItem.childrens.empty()) 
+		{
 			SelectMenuItem(rootItem.childrens.front());
 		}
 	}
@@ -28,7 +29,8 @@ namespace ArkanoidGame
 
 		std::vector<sf::Text*> texts;
 		texts.reserve(expandedItem.childrens.size());
-		for (auto& child : expandedItem.childrens) {
+		for (auto& child : expandedItem.childrens)
+		{
 			if (child.isEnabled) {
 				texts.push_back(&child.text);
 			}

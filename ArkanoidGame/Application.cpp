@@ -29,7 +29,8 @@ namespace ArkanoidGame
 
 			game.HandleWindowEvents(window);
 
-			if (!window.isOpen()) {
+			if (!window.isOpen())
+			{
 				break;
 			}
 
